@@ -234,6 +234,7 @@
   .divider{ height:1px; background:var(--border); border:none; margin:2px 0; }
   .muted{ color:var(--ink-faint); }
   .small{ font-size:12px; }
+  .small.over{ color:var(--danger); font-weight:700; }
   .stack{ display:flex; flex-direction:column; gap:10px; }
   .inline-list{ display:flex; flex-wrap:wrap; gap:8px; }
   .tag-editable{ display:flex; align-items:center; gap:8px; background:var(--surface-2); border:1px solid var(--border); border-radius:6px; padding:6px 8px 6px 12px; font-size:12.5px; }
@@ -567,8 +568,6 @@ function replay(woId){ return PFMLogic.replay(state, woId); }
 function available(woId, station){ return PFMLogic.available(state, woId, station); }
 function totalInProcess(woId){ return PFMLogic.totalInProcess(state, woId); }
 function woProgress(woId){ return PFMLogic.woProgress(state, woId); }
-function parseFreeText(text){ return PFMLogic.parseFreeText(text); }
-function runDiagnostics(fields){ return PFMLogic.runDiagnostics(state, fields); }
 
 /* ============================= NAV ============================= */
 const NAV = [
@@ -576,7 +575,7 @@ const NAV = [
   { id:"master", label:"產品 / 工單", icon:"box", title:"產品與工單", sub:"建立產品資料與生產工單" },
   { id:"stations", label:"站別設定", icon:"route", title:"站別設定", sub:"設定製程順序與異常處理分支" },
   { id:"transit", label:"過站登記", icon:"transit", title:"過站登記", sub:"記錄人員、產品、數量與站別" },
-  { id:"ai", label:"智慧輸入檢查", icon:"spark", title:"智慧輸入檢查", sub:"貼上紀錄文字，自動核對欄位是否正確" },
+  { id:"ai", label:"AI 助理", icon:"spark", title:"AI 助理", sub:"詢問目前生產狀況，AI 會依系統即時資料回答（唯讀，不會建立或修改紀錄）" },
   { id:"exceptions", label:"異常追蹤", icon:"alert", title:"異常追蹤", sub:"問題類型與後續站別接收狀態" },
   { id:"stats", label:"統計報表", icon:"chart", title:"統計報表", sub:"依產品、工單、站別統計數量" },
   { id:"history", label:"修正紀錄", icon:"history", title:"修正紀錄", sub:"追查輸入錯誤與異動前後對照" },
@@ -1028,121 +1027,92 @@ function ticketHtml(rec, wo){
     <div class="t-row"><span class="t-key">系統紀錄</span><span class="t-val">${escapeHtml(rec.date)} ${escapeHtml(rec.time)} 已保留原始資料</span></div></div>`;
 }
 
-/* ============================= AI SMART INPUT ============================= */
+/* ============================= AI 助理（對話介面） =============================
+   唯讀查詢助理：回答「現在鍍膜有排工單嗎」這類問題，資料來自即時 state。
+   不會建立或修改任何紀錄——過站登記/修正一律走各自頁面的表單與驗證。 */
+function getAiSessionId(){
+  let id = localStorage.getItem("pfmAiSessionId");
+  if (!id){
+    id = (crypto.randomUUID ? crypto.randomUUID() : "s_" + Date.now() + Math.random().toString(16).slice(2));
+    localStorage.setItem("pfmAiSessionId", id);
+  }
+  return id;
+}
+const aiSessionId = getAiSessionId();
+const AI_MAX_LENGTH = 2000;
+let aiChatLog = []; // 只是畫面顯示用，重整頁面會清空；AI 真正的記憶在伺服器端依 sessionId 保存
+
 function renderAI(){
   const el = document.getElementById("view-ai");
   el.innerHTML = `
-    <div class="grid cols-2">
-      <div class="card">
-        <div class="card-head"><h2>貼上過站紀錄文字</h2><span class="hint">支援「欄位：內容」逐行格式</span></div>
-        <div class="card-pad stack">
-          <textarea id="ai-input" rows="12" placeholder="產品名稱：80CS\n工單號碼：WO-20260808-01\n操作人員：王小明\n目前站別：接 Block\n本次完成數量：20件\n結果：Block 不良\n後續處理：清洗站"></textarea>
-          <div class="form-row">
-            <button class="btn accent" id="btn-analyze">${icon("spark")}分析並核對欄位</button>
-            <button class="btn ghost" id="btn-fill-sample">帶入範例文字</button>
+    <div class="card" style="height:calc(100vh - 180px); display:flex; flex-direction:column;">
+      <div class="card-head"><h2>詢問目前生產狀況</h2><span class="hint">唯讀查詢，不會建立或修改任何紀錄</span></div>
+      <div id="ai-chat-log" class="stack" style="flex:1; overflow-y:auto; padding:18px 20px;"></div>
+      <div style="border-top:1px solid var(--border); padding:14px 18px; display:flex; flex-direction:column; gap:8px;">
+        <div class="form-row" style="align-items:flex-end;">
+          <div class="field" style="flex:1;">
+            <textarea id="ai-chat-input" rows="2" placeholder="例如：鍍膜今天有排工單嗎？80CS 做到哪一站了？（Enter 送出，Shift+Enter 換行）" style="font-family:inherit;"></textarea>
           </div>
-          <div class="small muted">系統會逐項核對：產品／工單是否存在、操作人員是否填寫、站別是否符合製程順序、數量是否超過可過站數量、異常分支是否完整設定。此核對為內建規則引擎，資料不會送到外部伺服器。</div>
+          <button class="btn accent" id="btn-ai-send" style="flex:0 0 auto;">${icon("spark")}送出</button>
         </div>
+        <div class="small muted" id="ai-char-counter">0 / ${AI_MAX_LENGTH} 字</div>
       </div>
-      <div class="card">
-        <div class="card-head"><h2>核對結果</h2><span class="hint" id="ai-summary-hint"></span></div>
-        <div class="card-pad stack" id="ai-output"><span class="muted small">尚未分析，請於左側貼上內容並按下「分析並核對欄位」。</span></div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-head"><h2>AI 語意複核（選用）</h2><span class="hint">找出規則引擎judge不出來的可疑之處，例如錯字、簡稱、語意不清</span></div>
-      <div class="card-pad stack">
-        <div><button class="btn ghost" id="btn-ai-review">${icon("spark")}請 AI 額外複核一次</button></div>
-        <div id="ai-review-output" class="small"></div>
-      </div>
-    </div>
-    <div class="card" id="ai-history-card" hidden>
-      <div class="card-head"><h2>相關歷史紀錄</h2><span class="hint">同工單／同人員的既有紀錄，供追查輸入錯誤來源</span></div>
-      <div class="table-wrap"><table><thead><tr><th>時間</th><th>站別</th><th>類型</th><th>數量</th><th>操作人員</th></tr></thead><tbody id="ai-history-body"></tbody></table></div>
     </div>
   `;
 
-  document.getElementById("btn-fill-sample").addEventListener("click", () => {
-    document.getElementById("ai-input").value = "產品名稱：80CS\n工單號碼：WO-20260808-01\n操作人員：王小明\n目前站別：接 Block\n本次完成數量：20件\n結果：Block 不良\n後續處理：清洗站";
+  const log = document.getElementById("ai-chat-log");
+  const input = document.getElementById("ai-chat-input");
+  const counter = document.getElementById("ai-char-counter");
+
+  function renderLog(){
+    log.innerHTML = aiChatLog.length ? aiChatLog.map(m => {
+      const cssClass = m.kind === "user" ? "pass" : m.kind === "error" ? "fail" : "info";
+      const extraStyle = m.kind === "user" ? "margin-left:auto; background:var(--accent-soft);" : "";
+      return `
+      <div class="diag-row ${cssClass}" style="max-width:80%; ${extraStyle}">
+        <div class="diag-icon">${icon(m.kind==="user" ? "transit" : m.kind==="error" ? "cross" : "spark")}</div>
+        <div class="diag-msg" style="white-space:pre-wrap; color:var(--ink);">${escapeHtml(m.text)}</div>
+      </div>`;
+    }).join("") : `<span class="muted small">試著問問看：「鍍膜今天有要做事嗎？」「80CS 現在在哪一站？」「有沒有異常還沒處理？」</span>`;
+    log.scrollTop = log.scrollHeight;
+  }
+  renderLog();
+
+  function updateCounter(){
+    const len = input.value.length;
+    counter.textContent = `${len} / ${AI_MAX_LENGTH} 字`;
+    counter.classList.toggle("over", len > AI_MAX_LENGTH);
+  }
+  input.addEventListener("input", updateCounter);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey){ e.preventDefault(); sendAiChat(); }
   });
-  document.getElementById("btn-analyze").addEventListener("click", analyzeAIInput);
-  document.getElementById("btn-ai-review").addEventListener("click", runAiSemanticReview);
-}
+  document.getElementById("btn-ai-send").addEventListener("click", sendAiChat);
 
-async function runAiSemanticReview(){
-  const text = document.getElementById("ai-input").value;
-  const out = document.getElementById("ai-review-output");
-  if (!text.trim()){ out.innerHTML = `<span class="muted">請先在左側貼上內容。</span>`; return; }
-  out.innerHTML = `<span class="muted">AI 複核中...</span>`;
-  try{
-    const { review } = await api("/api/ai-review", "POST", { text });
-    out.innerHTML = `<div class="diag-row info"><div class="diag-icon">${icon("spark")}</div><div><div class="diag-title">AI 複核結果</div><div class="diag-msg">${escapeHtml(review)}</div></div></div>`;
-  }catch(err){
-    out.innerHTML = `<div class="diag-row warn"><div class="diag-icon">${icon("warn")}</div><div><div class="diag-title">AI 複核無法使用</div><div class="diag-msg">${escapeHtml(err.message)}</div></div></div>`;
+  async function sendAiChat(){
+    const text = input.value.trim();
+    if (!text) return;
+    if (text.length > AI_MAX_LENGTH){
+      aiChatLog.push({ kind: "error", text: `訊息過長，單次最多 ${AI_MAX_LENGTH} 字（目前 ${text.length} 字）。` });
+      renderLog();
+      return;
+    }
+    aiChatLog.push({ kind: "user", text });
+    input.value = "";
+    updateCounter();
+    renderLog();
+    document.getElementById("btn-ai-send").disabled = true;
+    try{
+      const { reply } = await api("/api/assistant/chat", "POST", { message: text, sessionId: aiSessionId });
+      aiChatLog.push({ kind: "ai", text: reply });
+    }catch(err){
+      aiChatLog.push({ kind: "error", text: err.message });
+    }finally{
+      document.getElementById("btn-ai-send").disabled = false;
+      renderLog();
+      input.focus();
+    }
   }
-}
-
-let lastDiagnosis = null;
-function analyzeAIInput(){
-  const text = document.getElementById("ai-input").value;
-  const fields = parseFreeText(text);
-  const result = runDiagnostics(fields);
-  lastDiagnosis = { fields, result };
-  const fails = result.diags.filter(d=>d.status==="fail").length;
-  const warns = result.diags.filter(d=>d.status==="warn").length;
-
-  document.getElementById("ai-summary-hint").textContent = fails ? `發現 ${fails} 項錯誤` : warns ? `${warns} 項提醒，其餘正常` : "全部核對通過";
-
-  const out = document.getElementById("ai-output");
-  out.innerHTML = result.diags.map(d => `
-    <div class="diag-row ${d.status}">
-      <div class="diag-icon">${icon(d.status==="pass"?"check":d.status==="fail"?"cross":"warn")}</div>
-      <div><div class="diag-title">${escapeHtml(d.title)}</div><div class="diag-msg">${escapeHtml(d.msg)}</div></div>
-    </div>`).join("");
-
-  if (!fails){
-    const previewRec = {
-      productName: fields.product, station: fields.station,
-      operator: fields.operator, qty: result.qtyNum, reason: fields.reason || "",
-      type: result.effectiveType,
-      problemType: result.effectiveProblemType || "", targetStation: fields.followUp || (exTypeByName(result.effectiveProblemType||"")||{}).targetStationName || "",
-      date: fields.date || fmtDate(Date.now()), time: fields.time || fmtTime(Date.now()),
-    };
-    out.innerHTML += `<div class="divider" style="margin:14px 0"></div>` + ticketHtml(previewRec, result.wo) +
-      `<div style="margin-top:12px"><button class="btn accent" id="btn-commit-ai">${icon("check")}確認登記此筆紀錄</button></div>`;
-    document.getElementById("btn-commit-ai").addEventListener("click", () => commitAIRecord(fields, result));
-  }
-
-  const histCard = document.getElementById("ai-history-card");
-  if (result.wo || fields.operator){
-    const rows = state.records.filter(r => !r.superseded && ((result.wo && r.workOrderId===result.wo.id) || (fields.operator && r.operator===fields.operator))).sort((a,b)=>b.createdAt-a.createdAt).slice(0,8);
-    histCard.hidden = rows.length===0;
-    document.getElementById("ai-history-body").innerHTML = rows.map(r => {
-      const t = r.type==="normal"?`<span class="chip success">正常</span>`:r.type==="skip"?`<span class="chip warning">跳站</span>`:`<span class="chip danger">異常</span>`;
-      return `<tr><td class="num small">${escapeHtml(r.date)} ${escapeHtml(r.time)}</td><td>${escapeHtml(r.station)}</td><td>${t}</td><td class="num">${r.qty}</td><td>${escapeHtml(r.operator)}</td></tr>`;
-    }).join("");
-  } else { histCard.hidden = true; }
-}
-
-async function commitAIRecord(fields, result){
-  const type = result.effectiveType;
-  const targetStation = fields.followUp || (exTypeByName(result.effectiveProblemType||"")||{}).targetStationName || "";
-  try{
-    await api("/api/records", "POST", {
-      workOrderId: result.wo.id, operator: fields.operator, station: fields.station,
-      qty: result.qtyNum, type, reason: fields.reason || "",
-      problemType: result.effectiveProblemType || "", targetStation,
-      date: fields.date || fmtDate(Date.now()), time: fields.time || fmtTime(Date.now()),
-    });
-  }catch(err){
-    document.getElementById("ai-output").innerHTML += `<div class="divider" style="margin:14px 0"></div><div class="diag-row fail"><div class="diag-icon">${icon("cross")}</div><div><div class="diag-title">登記失敗</div><div class="diag-msg">${escapeHtml(err.message)}</div></div></div>`;
-    return;
-  }
-  await refreshState();
-  currentView = "ai";
-  render();
-  document.getElementById("ai-input").value = "";
-  document.getElementById("ai-output").innerHTML = `<div class="diag-row pass"><div class="diag-icon">${icon("check")}</div><div><div class="diag-title">已登記完成</div><div class="diag-msg">紀錄已寫入系統，可於總覽或異常追蹤查看最新狀態。</div></div></div>`;
 }
 
 /* ============================= EXCEPTIONS ============================= */
