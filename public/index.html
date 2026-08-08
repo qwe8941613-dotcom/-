@@ -242,6 +242,44 @@
   .order-btns{ display:flex; flex-direction:column; }
   .order-btns button{ border:none; background:none; color:var(--ink-faint); padding:0 4px; line-height:1; }
   .order-btns button:hover{ color:var(--ink); }
+
+  /* ---- 站別積木：拖拉排流程 ---- */
+  .block-palette{ display:flex; flex-wrap:wrap; gap:10px; padding:14px; background:var(--surface-2); border:1.5px dashed var(--border-strong); border-radius:10px; }
+  .block-tile{
+    position:relative; display:flex; align-items:center; gap:7px; padding:9px 16px 9px 12px;
+    border-radius:8px 8px 8px 2px; font-size:12.5px; font-weight:700; color:#fff;
+    cursor:grab; user-select:none; box-shadow:0 2px 0 rgba(0,0,0,.18), 0 1px 3px rgba(0,0,0,.25);
+    transition:transform .12s ease, box-shadow .12s ease;
+  }
+  .block-tile::after{
+    content:""; position:absolute; right:-6px; top:50%; transform:translateY(-50%);
+    width:12px; height:14px; background:inherit; border-radius:0 4px 4px 0;
+  }
+  .block-tile:hover{ transform:translateY(-1px); box-shadow:0 3px 0 rgba(0,0,0,.2), 0 3px 6px rgba(0,0,0,.3); }
+  .block-tile:active{ cursor:grabbing; }
+  .block-tile.dragging{ opacity:.4; }
+  .block-tile .trash-btn{ background:rgba(0,0,0,.2); border:none; color:#fff; border-radius:4px; width:16px; height:16px; display:flex; align-items:center; justify-content:center; cursor:pointer; padding:0; }
+  .block-tile .trash-btn:hover{ background:rgba(0,0,0,.4); }
+  .block-tile .trash-btn svg{ width:10px; height:10px; }
+
+  .block-chain{ display:flex; flex-wrap:wrap; align-items:center; gap:0; min-height:56px; padding:12px; background:var(--surface-2); border-radius:10px; border:1.5px solid var(--border); }
+  .block-chain.dropzone-active{ border-color:var(--accent); background:var(--accent-soft); }
+  .block-chain .chain-connector{ width:16px; height:3px; background:var(--border-strong); flex:0 0 auto; }
+  .block-chain-empty{ color:var(--ink-faint); font-size:12.5px; padding:0 6px; }
+  .chain-block{
+    position:relative; display:flex; align-items:center; gap:6px; padding:8px 10px 8px 16px;
+    border-radius:2px 8px 8px 2px; font-size:12.5px; font-weight:700; color:#fff;
+    box-shadow:0 2px 0 rgba(0,0,0,.18); cursor:grab;
+  }
+  .chain-block::before{
+    content:""; position:absolute; left:-6px; top:50%; transform:translateY(-50%);
+    width:12px; height:14px; background:var(--surface-2); border-radius:4px 0 0 4px;
+  }
+  .chain-block .order-num{ font-family:var(--font-mono); font-size:10px; opacity:.75; }
+  .chain-block button{ background:rgba(0,0,0,.2); border:none; color:#fff; border-radius:4px; padding:2px; display:flex; cursor:pointer; }
+  .chain-block button:hover{ background:rgba(0,0,0,.4); }
+  .chain-block button svg{ width:11px; height:11px; }
+  .chain-block button:disabled{ opacity:.35; cursor:default; }
   .diff-old{ text-decoration:line-through; color:var(--danger); opacity:.75; }
   .diff-new{ color:var(--success); font-weight:700; }
   code.k{ background:var(--surface-2); padding:1px 5px; border-radius:4px; font-family:var(--font-mono); font-size:11.5px; }
@@ -582,6 +620,13 @@ function fmtTime(ts){ const d = new Date(ts); return String(d.getHours()).padSta
 function fmtDateTime(ts){ return fmtDate(ts)+" "+fmtTime(ts); }
 function escapeHtml(s){ return String(s??"").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 
+const BLOCK_COLORS = ["#4C97FF","#9966FF","#FF6680","#0FBF9F","#FF9F1C","#59C059","#FF6B57","#6B7FD7"];
+function blockColor(id){
+  let h = 0;
+  for (let i=0;i<id.length;i++) h = (h*31 + id.charCodeAt(i)) >>> 0;
+  return BLOCK_COLORS[h % BLOCK_COLORS.length];
+}
+
 /* Business logic (station replay, quantity limits, AI diagnostics) lives in
    PFMLogic — a pure module unit-tested by pfm-logic.test.js — and is wired
    here against the live `state`. See pfm-logic.js for the tested source. */
@@ -808,15 +853,24 @@ function renderMaster(){
   });
 }
 
-/* ============================= STATIONS (站別積木 + 製程) ============================= */
+/* ============================= STATIONS (站別積木 + 製程，拖拉排列) ============================= */
+function stationBlockTile(s, opts){
+  opts = opts || {};
+  const color = blockColor(s.id);
+  return `<div class="block-tile" draggable="true" data-drag-station="${s.id}" style="background:${color}">
+    <span>${escapeHtml(s.name)}</span>
+    ${opts.withDelete ? `<button class="trash-btn" data-del-station="${s.id}" title="刪除積木">${icon("trash")}</button>` : ""}
+  </div>`;
+}
+
 function renderStations(){
   const el = document.getElementById("view-stations");
   el.innerHTML = `
     <div class="grid cols-2">
       <div class="card">
-        <div class="card-head"><h2>站別積木庫</h2><span class="hint">可重複使用的站別，像積木一樣拿去排進不同製程</span></div>
+        <div class="card-head"><h2>站別積木庫</h2><span class="hint">拖拉積木到下方製程裡排隊，一個積木可以用在多個製程</span></div>
         <div class="card-pad stack">
-          <div class="inline-list" id="station-list"></div>
+          <div class="block-palette" id="station-list"></div>
           <div class="form-row">
             <div class="field" style="flex:2"><label>新增站別積木</label><input type="text" id="f-station-name" placeholder="例：鍍膜站"></div>
             <div class="field" style="flex:0 0 auto; align-self:flex-end"><button class="btn accent" id="btn-add-station">${icon("plus")}新增</button></div>
@@ -838,7 +892,7 @@ function renderStations(){
     </div>
 
     <div class="card">
-      <div class="card-head"><h2>製程管理</h2><span class="hint">把積木排成一條產品要跑的流程，不同產品可以用不同製程</span></div>
+      <div class="card-head"><h2>製程管理</h2><span class="hint">把積木拖進下面的軌道排成一條產品要跑的流程，不同產品可以用不同製程</span></div>
       <div class="card-pad stack">
         <div class="form-row">
           <div class="field" style="flex:2"><label>新增製程</label><input type="text" id="f-process-name" placeholder="例：鍍膜製程"></div>
@@ -849,11 +903,9 @@ function renderStations(){
     </div>
   `;
 
-  document.getElementById("station-list").innerHTML = state.stations.length ? state.stations.map(s => `
-    <div class="tag-editable">
-      <b>${escapeHtml(s.name)}</b>
-      <button class="btn ghost sm" data-del-station="${s.id}">${icon("trash")}</button>
-    </div>`).join("") : `<span class="muted small">尚未建立任何站別積木</span>`;
+  document.getElementById("station-list").innerHTML = state.stations.length
+    ? state.stations.map(s => stationBlockTile(s, { withDelete: true })).join("")
+    : `<span class="muted small">尚未建立任何站別積木</span>`;
 
   document.getElementById("ex-type-list").innerHTML = state.exceptionTypes.length ? state.exceptionTypes.map(e => `
     <tr><td><b>${escapeHtml(e.type)}</b></td><td><span class="chip info">${escapeHtml(e.targetStationName)}</span></td>
@@ -864,17 +916,14 @@ function renderStations(){
   procList.innerHTML = state.processes.length ? state.processes.map(proc => {
     const usedByProducts = state.products.filter(p => p.processId === proc.id).map(p => p.name);
     const blocksInProc = proc.stationIds.map(id => stationById(id)).filter(Boolean);
-    const availableBlocks = state.stations.filter(s => !proc.stationIds.includes(s.id));
-    const pipeline = blocksInProc.length ? blocksInProc.map((s, idx) => `
-        <div class="tag-editable">
-          <span class="eyebrow num">${String(idx+1).padStart(2,"0")}</span><b>${escapeHtml(s.name)}</b>
-          <div class="order-btns">
-            <button data-proc-up="${proc.id}" data-station="${s.id}" ${idx===0?"disabled":""}>${icon("up")}</button>
-            <button data-proc-down="${proc.id}" data-station="${s.id}" ${idx===blocksInProc.length-1?"disabled":""}>${icon("down")}</button>
-          </div>
-          <button class="btn ghost sm" data-proc-remove="${proc.id}" data-station="${s.id}">${icon("trash")}</button>
-        </div>` + (idx < blocksInProc.length-1 ? `<span class="muted" style="align-self:center">→</span>` : "")
-      ).join("") : `<span class="muted small">尚未加入任何站別，從下方選擇積木加入</span>`;
+    const chainHtml = blocksInProc.length ? blocksInProc.map((s, idx) => {
+      const color = blockColor(s.id);
+      const connector = idx < blocksInProc.length-1 ? `<div class="chain-connector"></div>` : "";
+      return `<div class="chain-block" draggable="true" data-drag-chain="${s.id}" data-proc="${proc.id}" style="background:${color}">
+        <span class="order-num">${idx+1}</span><span>${escapeHtml(s.name)}</span>
+        <button data-proc-remove="${proc.id}" data-station="${s.id}" title="從此製程移除">${icon("trash")}</button>
+      </div>${connector}`;
+    }).join("") : `<span class="block-chain-empty">把左邊積木庫的站別拖進這裡開始排流程</span>`;
     return `
       <div class="card" style="box-shadow:none">
         <div class="card-pad stack">
@@ -882,15 +931,7 @@ function renderStations(){
             <div><b>${escapeHtml(proc.name)}</b> <span class="small muted">${usedByProducts.length ? "使用中：" + usedByProducts.map(escapeHtml).join("、") : "尚無產品使用"}</span></div>
             <button class="btn ghost sm" data-del-process="${proc.id}">${icon("trash")}刪除製程</button>
           </div>
-          <div class="inline-list" style="align-items:center">${pipeline}</div>
-          <div class="form-row">
-            <div class="field" style="flex:2"><label>加入站別積木</label>
-              <select data-proc-add="${proc.id}" ${availableBlocks.length?"":"disabled"}>
-                ${availableBlocks.length ? availableBlocks.map(s=>`<option value="${s.id}">${escapeHtml(s.name)}</option>`).join("") : `<option>（積木已全數加入，或尚未建立積木）</option>`}
-              </select>
-            </div>
-            <div class="field" style="flex:0 0 auto; align-self:flex-end"><button class="btn ghost sm" data-proc-add-btn="${proc.id}" ${availableBlocks.length?"":"disabled"}>${icon("plus")}加入</button></div>
-          </div>
+          <div class="block-chain" data-dropzone="${proc.id}">${chainHtml}</div>
         </div>
       </div>`;
   }).join("") : `<span class="muted small">尚未建立任何製程</span>`;
@@ -900,7 +941,8 @@ function renderStations(){
     if (!name){ alert("請輸入站別名稱"); return; }
     withServerSync(() => api("/api/stations", "POST", { name }));
   });
-  el.querySelectorAll("[data-del-station]").forEach(b=>b.addEventListener("click",()=>{
+  el.querySelectorAll("[data-del-station]").forEach(b=>b.addEventListener("click",(e)=>{
+    e.stopPropagation();
     if (!confirm("刪除此站別積木？會一併從所有製程中移除，已產生的過站紀錄仍會保留原始站別名稱。")) return;
     withServerSync(() => api("/api/stations/" + b.dataset.delStation, "DELETE"));
   }));
@@ -924,31 +966,83 @@ function renderStations(){
     if (!confirm("刪除此製程？若仍有產品使用，將無法刪除。")) return;
     withServerSync(() => api("/api/processes/" + b.dataset.delProcess, "DELETE"));
   }));
-  el.querySelectorAll("[data-proc-add-btn]").forEach(b=>b.addEventListener("click",()=>{
-    const procId = b.dataset.procAddBtn;
-    const sel = el.querySelector(`[data-proc-add="${procId}"]`);
-    if (!sel || !sel.value) return;
-    withServerSync(() => api(`/api/processes/${procId}/stations`, "POST", { stationId: sel.value }));
-  }));
-  el.querySelectorAll("[data-proc-remove]").forEach(b=>b.addEventListener("click",()=>{
+  el.querySelectorAll("[data-proc-remove]").forEach(b=>b.addEventListener("click",(e)=>{
+    e.stopPropagation();
     withServerSync(() => api(`/api/processes/${b.dataset.procRemove}/stations/${b.dataset.station}`, "DELETE"));
   }));
-  el.querySelectorAll("[data-proc-up]").forEach(b=>b.addEventListener("click",()=>{
-    const proc = processById(b.dataset.procUp);
-    const i = proc.stationIds.indexOf(b.dataset.station);
-    if (i<=0) return;
-    const stationIds = proc.stationIds.slice();
-    [stationIds[i-1], stationIds[i]] = [stationIds[i], stationIds[i-1]];
-    withServerSync(() => api(`/api/processes/${proc.id}/stations/reorder`, "POST", { stationIds }));
-  }));
-  el.querySelectorAll("[data-proc-down]").forEach(b=>b.addEventListener("click",()=>{
-    const proc = processById(b.dataset.procDown);
-    const i = proc.stationIds.indexOf(b.dataset.station);
-    if (i<0 || i>=proc.stationIds.length-1) return;
-    const stationIds = proc.stationIds.slice();
-    [stationIds[i+1], stationIds[i]] = [stationIds[i], stationIds[i+1]];
-    withServerSync(() => api(`/api/processes/${proc.id}/stations/reorder`, "POST", { stationIds }));
-  }));
+
+  wireStationDragAndDrop(el);
+}
+
+/* 拖拉邏輯：從積木庫拖站別到某製程的軌道（加入到最後，或插在既有積木之間），
+   或是把軌道上已經在排的積木拖到新位置（同一製程內重新排序）。 */
+function wireStationDragAndDrop(el){
+  let dragPayload = null; // { stationId, fromProcessId | null }
+
+  el.querySelectorAll("[data-drag-station]").forEach(tile => {
+    tile.addEventListener("dragstart", (e) => {
+      dragPayload = { stationId: tile.dataset.dragStation, fromProcessId: null };
+      tile.classList.add("dragging");
+      e.dataTransfer.effectAllowed = "copy";
+    });
+    tile.addEventListener("dragend", () => tile.classList.remove("dragging"));
+  });
+  el.querySelectorAll("[data-drag-chain]").forEach(block => {
+    block.addEventListener("dragstart", (e) => {
+      dragPayload = { stationId: block.dataset.dragChain, fromProcessId: block.dataset.proc };
+      block.classList.add("dragging");
+      e.dataTransfer.effectAllowed = "move";
+    });
+    block.addEventListener("dragend", () => block.classList.remove("dragging"));
+  });
+
+  el.querySelectorAll("[data-dropzone]").forEach(zone => {
+    const procId = zone.dataset.dropzone;
+    zone.addEventListener("dragover", (e) => { e.preventDefault(); zone.classList.add("dropzone-active"); });
+    zone.addEventListener("dragleave", () => zone.classList.remove("dropzone-active"));
+    zone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      zone.classList.remove("dropzone-active");
+      if (!dragPayload) return;
+      const { stationId, fromProcessId } = dragPayload;
+      dragPayload = null;
+
+      // 決定插入位置：滑鼠落點左邊已經有幾個積木。
+      const chainBlocks = [...zone.querySelectorAll("[data-drag-chain]")].filter(b => b.dataset.dragChain !== stationId || fromProcessId !== procId);
+      let insertBeforeId = null;
+      for (const b of chainBlocks) {
+        const rect = b.getBoundingClientRect();
+        if (e.clientX < rect.left + rect.width/2) { insertBeforeId = b.dataset.dragChain; break; }
+      }
+
+      if (fromProcessId === procId) {
+        // 同一條軌道內重新排序
+        const proc = processById(procId);
+        const ids = proc.stationIds.filter(id => id !== stationId);
+        const insertAt = insertBeforeId ? ids.indexOf(insertBeforeId) : ids.length;
+        ids.splice(insertAt < 0 ? ids.length : insertAt, 0, stationId);
+        withServerSync(() => api(`/api/processes/${procId}/stations/reorder`, "POST", { stationIds: ids }));
+      } else if (!fromProcessId) {
+        // 從積木庫拖進來：先加入，如果沒有落在最後面，再排到正確位置
+        withServerSync(async () => {
+          await api(`/api/processes/${procId}/stations`, "POST", { stationId });
+          if (insertBeforeId) {
+            const proc = state.processes.find(p => p.id === procId);
+            const ids = proc.stationIds.filter(id => id !== stationId);
+            const insertAt = ids.indexOf(insertBeforeId);
+            ids.splice(insertAt < 0 ? ids.length : insertAt, 0, stationId);
+            await api(`/api/processes/${procId}/stations/reorder`, "POST", { stationIds: ids });
+          }
+        });
+      } else {
+        // 從另一個製程的軌道拖過來：從原製程移除，加入這個製程
+        withServerSync(async () => {
+          await api(`/api/processes/${fromProcessId}/stations/${stationId}`, "DELETE");
+          await api(`/api/processes/${procId}/stations`, "POST", { stationId });
+        });
+      }
+    });
+  });
 }
 
 /* ============================= TRANSIT (過站登記) ============================= */
