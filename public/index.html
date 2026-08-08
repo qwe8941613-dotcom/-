@@ -1,0 +1,1296 @@
+<title>生產流程管理系統</title>
+<style>
+  :root{
+    --bg:#EEF0EE;
+    --surface:#FFFFFF;
+    --surface-2:#E3E7E5;
+    --ink:#1B2422;
+    --ink-dim:#57635F;
+    --ink-faint:#8A948F;
+    --border:#CBD2CE;
+    --border-strong:#AAB4AE;
+    --accent:#B5601C;
+    --accent-ink:#FFFFFF;
+    --accent-soft:#B5601C1A;
+    --success:#2F7A4F;
+    --success-soft:#2F7A4F1A;
+    --warning:#B4790F;
+    --warning-soft:#B4790F1A;
+    --danger:#B23A2E;
+    --danger-soft:#B23A2E1A;
+    --info:#286E78;
+    --info-soft:#286E781A;
+    --shadow: 0 1px 2px rgba(20,24,22,.06), 0 4px 14px rgba(20,24,22,.05);
+    --radius: 8px;
+    --font-body: -apple-system, "Segoe UI", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+    --font-mono: ui-monospace, "Cascadia Mono", "SFMono-Regular", Consolas, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14181A;
+      --surface:#1B2123;
+      --surface-2:#232B2C;
+      --ink:#E7ECE9;
+      --ink-dim:#9AA6A1;
+      --ink-faint:#6C7975;
+      --border:#323C3D;
+      --border-strong:#46524F;
+      --accent:#E29A4A;
+      --accent-ink:#171B14;
+      --accent-soft:#E29A4A26;
+      --success:#57B279;
+      --success-soft:#57B27926;
+      --warning:#E0AB3E;
+      --warning-soft:#E0AB3E26;
+      --danger:#E37164;
+      --danger-soft:#E3716426;
+      --info:#5CBAC4;
+      --info-soft:#5CBAC426;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 20px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#14181A; --surface:#1B2123; --surface-2:#232B2C; --ink:#E7ECE9; --ink-dim:#9AA6A1; --ink-faint:#6C7975;
+    --border:#323C3D; --border-strong:#46524F; --accent:#E29A4A; --accent-ink:#171B14; --accent-soft:#E29A4A26;
+    --success:#57B279; --success-soft:#57B27926; --warning:#E0AB3E; --warning-soft:#E0AB3E26;
+    --danger:#E37164; --danger-soft:#E3716426; --info:#5CBAC4; --info-soft:#5CBAC426;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 20px rgba(0,0,0,.35);
+  }
+  :root[data-theme="light"]{
+    --bg:#EEF0EE; --surface:#FFFFFF; --surface-2:#E3E7E5; --ink:#1B2422; --ink-dim:#57635F; --ink-faint:#8A948F;
+    --border:#CBD2CE; --border-strong:#AAB4AE; --accent:#B5601C; --accent-ink:#FFFFFF; --accent-soft:#B5601C1A;
+    --success:#2F7A4F; --success-soft:#2F7A4F1A; --warning:#B4790F; --warning-soft:#B4790F1A;
+    --danger:#B23A2E; --danger-soft:#B23A2E1A; --info:#286E78; --info-soft:#286E781A;
+    --shadow: 0 1px 2px rgba(20,24,22,.06), 0 4px 14px rgba(20,24,22,.05);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg); color:var(--ink); font-family:var(--font-body);
+    font-size:14px; line-height:1.55; -webkit-font-smoothing:antialiased;
+  }
+  ::selection{ background:var(--accent-soft); }
+  button, input, select, textarea{ font-family:inherit; font-size:inherit; color:inherit; }
+  button{ cursor:pointer; }
+  a{ color:var(--accent); }
+  .num{ font-family:var(--font-mono); font-variant-numeric:tabular-nums; }
+  .eyebrow{ font-size:11px; font-weight:700; letter-spacing:.09em; text-transform:uppercase; color:var(--ink-faint); }
+
+  .shell{ display:flex; min-height:100vh; }
+
+  /* ---------- sidebar ---------- */
+  .sidebar{
+    width:216px; flex:0 0 216px; background:var(--surface); border-right:1px solid var(--border);
+    display:flex; flex-direction:column; padding:18px 12px; gap:22px; position:sticky; top:0; height:100vh; overflow-y:auto;
+  }
+  .brand{ display:flex; align-items:center; gap:10px; padding:0 6px; }
+  .brand-mark{
+    width:34px; height:34px; border-radius:6px; background:var(--ink); color:var(--bg);
+    display:flex; align-items:center; justify-content:center; font-weight:800; font-size:13px; letter-spacing:.02em; flex:0 0 auto;
+  }
+  :root[data-theme="dark"] .brand-mark, @media (prefers-color-scheme:dark){ .brand-mark{ background:var(--accent); color:var(--accent-ink); } }
+  .brand-text{ display:flex; flex-direction:column; line-height:1.25; }
+  .brand-text b{ font-size:14px; font-weight:800; letter-spacing:.01em; }
+  .brand-text span{ font-size:10.5px; color:var(--ink-faint); font-family:var(--font-mono); }
+
+  .nav{ display:flex; flex-direction:column; gap:2px; }
+  .nav-group-label{ font-size:10.5px; font-weight:700; letter-spacing:.09em; text-transform:uppercase; color:var(--ink-faint); padding:10px 10px 4px; }
+  .nav-item{
+    display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:6px; border:none; background:transparent;
+    color:var(--ink-dim); text-align:left; width:100%; font-size:13px; font-weight:600;
+  }
+  .nav-item svg{ width:16px; height:16px; flex:0 0 auto; opacity:.85; }
+  .nav-item:hover{ background:var(--surface-2); color:var(--ink); }
+  .nav-item.active{ background:var(--accent-soft); color:var(--accent); }
+  .nav-item .count{ margin-left:auto; font-family:var(--font-mono); font-size:11px; color:var(--ink-faint); }
+  .nav-item.active .count{ color:var(--accent); }
+
+  .sidebar-foot{ margin-top:auto; padding:10px; border-top:1px solid var(--border); font-size:11px; color:var(--ink-faint); }
+
+  /* ---------- main ---------- */
+  .main{ flex:1; min-width:0; display:flex; flex-direction:column; }
+  .topbar{
+    display:flex; align-items:baseline; justify-content:space-between; gap:12px;
+    padding:22px 30px 14px; border-bottom:1px solid var(--border); background:var(--bg);
+    position:sticky; top:0; z-index:5;
+  }
+  .topbar h1{ font-size:20px; margin:0; font-weight:800; letter-spacing:-.01em; text-wrap:balance; }
+  .topbar p{ margin:2px 0 0; color:var(--ink-dim); font-size:12.5px; }
+  .view{ padding:22px 30px 60px; display:flex; flex-direction:column; gap:20px; }
+  .view[hidden]{ display:none; }
+
+  /* ---------- shared bits ---------- */
+  .card{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow); }
+  .card-pad{ padding:18px 20px; }
+  .card-head{ display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:1px solid var(--border); gap:10px; }
+  .card-head h2{ font-size:14px; margin:0; font-weight:700; }
+  .card-head .hint{ font-size:12px; color:var(--ink-faint); }
+  .grid{ display:grid; gap:16px; }
+  .grid.cols-2{ grid-template-columns:1fr 1fr; }
+  .grid.cols-3{ grid-template-columns:repeat(3,1fr); }
+  .grid.cols-4{ grid-template-columns:repeat(4,1fr); }
+  @media (max-width:1000px){ .grid.cols-2, .grid.cols-3, .grid.cols-4{ grid-template-columns:1fr; } }
+
+  .field{ display:flex; flex-direction:column; gap:5px; }
+  .field label{ font-size:11.5px; font-weight:700; color:var(--ink-dim); letter-spacing:.02em; }
+  .field .req{ color:var(--danger); }
+  input[type=text], input[type=number], input[type=date], input[type=time], input[type=password], select, textarea{
+    background:var(--bg); border:1px solid var(--border-strong); border-radius:6px; padding:8px 10px; color:var(--ink);
+    outline:none; width:100%;
+  }
+  textarea{ resize:vertical; font-family:var(--font-mono); line-height:1.6; }
+  input:focus, select:focus, textarea:focus{ border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
+  .form-row{ display:flex; gap:12px; flex-wrap:wrap; }
+  .form-row > .field{ flex:1; min-width:150px; }
+  .radio-row{ display:flex; gap:8px; flex-wrap:wrap; }
+  .radio-chip{ display:flex; align-items:center; gap:6px; border:1px solid var(--border-strong); border-radius:20px; padding:6px 12px; font-size:12.5px; font-weight:600; color:var(--ink-dim); }
+  .radio-chip input{ accent-color:var(--accent); }
+  .radio-chip.checked{ border-color:var(--accent); color:var(--accent); background:var(--accent-soft); }
+
+  .btn{ display:inline-flex; align-items:center; gap:7px; border-radius:6px; border:1px solid var(--border-strong); background:var(--surface); color:var(--ink); padding:8px 14px; font-size:12.5px; font-weight:700; white-space:nowrap; }
+  .btn:hover{ border-color:var(--ink-faint); }
+  .btn.primary{ background:var(--ink); border-color:var(--ink); color:var(--bg); }
+  :root[data-theme="dark"] .btn.primary, @media (prefers-color-scheme: dark){ .btn.primary{ background:var(--accent); border-color:var(--accent); color:var(--accent-ink); } }
+  .btn.accent{ background:var(--accent); border-color:var(--accent); color:var(--accent-ink); }
+  .btn.ghost{ background:transparent; border-color:transparent; color:var(--ink-dim); padding:6px 8px; }
+  .btn.ghost:hover{ color:var(--ink); background:var(--surface-2); }
+  .btn.danger{ color:var(--danger); border-color:var(--danger-soft); }
+  .btn.sm{ padding:5px 10px; font-size:11.5px; }
+  .btn:disabled{ opacity:.45; cursor:not-allowed; }
+  .btn:focus-visible, .nav-item:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible{ outline:2px solid var(--accent); outline-offset:1px; }
+
+  table{ width:100%; border-collapse:collapse; font-size:12.8px; }
+  th{ text-align:left; font-size:10.5px; text-transform:uppercase; letter-spacing:.07em; color:var(--ink-faint); font-weight:700; padding:9px 12px; border-bottom:1px solid var(--border); white-space:nowrap; }
+  td{ padding:10px 12px; border-bottom:1px solid var(--border); vertical-align:middle; }
+  tr:last-child td{ border-bottom:none; }
+  tbody tr:hover{ background:var(--surface-2); }
+  .table-wrap{ overflow-x:auto; }
+  .empty-row{ color:var(--ink-faint); font-style:normal; text-align:center; padding:26px 12px; }
+
+  .chip{ display:inline-flex; align-items:center; gap:5px; padding:3px 9px; border-radius:20px; font-size:11px; font-weight:700; }
+  .chip.success{ background:var(--success-soft); color:var(--success); }
+  .chip.warning{ background:var(--warning-soft); color:var(--warning); }
+  .chip.danger{ background:var(--danger-soft); color:var(--danger); }
+  .chip.info{ background:var(--info-soft); color:var(--info); }
+  .chip.neutral{ background:var(--surface-2); color:var(--ink-dim); }
+  .dot{ width:6px; height:6px; border-radius:50%; background:currentColor; flex:0 0 auto; }
+
+  /* KPI tiles */
+  .kpi{ padding:16px 18px; display:flex; flex-direction:column; gap:6px; border-left:3px solid var(--border-strong); }
+  .kpi.accent{ border-left-color:var(--accent); }
+  .kpi.warn{ border-left-color:var(--warning); }
+  .kpi.danger{ border-left-color:var(--danger); }
+  .kpi.ok{ border-left-color:var(--success); }
+  .kpi .kpi-num{ font-family:var(--font-mono); font-size:26px; font-weight:700; letter-spacing:-.01em; }
+  .kpi .kpi-label{ font-size:11.5px; color:var(--ink-dim); font-weight:600; }
+
+  /* pipeline visualization */
+  .traveler{ padding:14px 18px; display:flex; flex-direction:column; gap:10px; }
+  .traveler-top{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+  .traveler-id{ font-family:var(--font-mono); font-weight:700; font-size:13px; }
+  .traveler-meta{ font-size:12px; color:var(--ink-dim); }
+  .pipeline{ display:flex; align-items:center; gap:0; overflow-x:auto; padding:4px 0; }
+  .pipe-node{ display:flex; flex-direction:column; align-items:center; gap:6px; min-width:78px; flex:0 0 auto; position:relative; }
+  .pipe-dot{ width:15px; height:15px; border-radius:50%; border:2px solid var(--border-strong); background:var(--surface); z-index:1; }
+  .pipe-node.done .pipe-dot{ background:var(--success); border-color:var(--success); }
+  .pipe-node.current .pipe-dot{ background:var(--accent); border-color:var(--accent); box-shadow:0 0 0 4px var(--accent-soft); }
+  .pipe-node.exception .pipe-dot{ background:var(--danger); border-color:var(--danger); box-shadow:0 0 0 4px var(--danger-soft); }
+  .pipe-label{ font-size:10.5px; color:var(--ink-dim); text-align:center; white-space:nowrap; }
+  .pipe-node.current .pipe-label{ color:var(--accent); font-weight:700; }
+  .pipe-node.exception .pipe-label{ color:var(--danger); font-weight:700; }
+  .pipe-qty{ font-family:var(--font-mono); font-size:9.5px; color:var(--ink-faint); }
+  .pipe-line{ flex:1; height:2px; background:var(--border-strong); min-width:22px; margin-bottom:20px; }
+  .pipe-line.done{ background:var(--success); }
+  .progress-bar{ height:5px; border-radius:3px; background:var(--surface-2); overflow:hidden; }
+  .progress-bar > i{ display:block; height:100%; background:var(--accent); }
+
+  /* diagnostic list (AI check) */
+  .diag-row{ display:flex; gap:10px; padding:10px 12px; border-radius:6px; border:1px solid var(--border); background:var(--surface); align-items:flex-start; }
+  .diag-row + .diag-row{ margin-top:8px; }
+  .diag-row.pass{ border-left:3px solid var(--success); }
+  .diag-row.fail{ border-left:3px solid var(--danger); }
+  .diag-row.warn{ border-left:3px solid var(--warning); }
+  .diag-icon{ flex:0 0 auto; width:18px; height:18px; margin-top:1px; }
+  .diag-row.pass .diag-icon{ color:var(--success); }
+  .diag-row.fail .diag-icon{ color:var(--danger); }
+  .diag-row.warn .diag-icon{ color:var(--warning); }
+  .diag-title{ font-weight:700; font-size:12.8px; }
+  .diag-msg{ color:var(--ink-dim); font-size:12.3px; margin-top:2px; }
+
+  .ticket{ border:1px dashed var(--border-strong); border-radius:8px; padding:16px 18px; background:var(--surface-2); font-family:var(--font-mono); font-size:12.5px; line-height:1.9; }
+  .ticket .t-row{ display:flex; justify-content:space-between; gap:14px; border-bottom:1px dotted var(--border); padding:2px 0; }
+  .ticket .t-row:last-child{ border-bottom:none; }
+  .ticket .t-key{ color:var(--ink-faint); }
+  .ticket .t-val{ font-weight:700; }
+
+  .stat-bar-row{ display:flex; align-items:center; gap:10px; padding:7px 0; }
+  .stat-bar-row .name{ width:130px; flex:0 0 auto; font-size:12.5px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .stat-bar-track{ flex:1; height:9px; border-radius:5px; background:var(--surface-2); overflow:hidden; }
+  .stat-bar-fill{ height:100%; background:var(--accent); }
+  .stat-bar-num{ width:60px; text-align:right; font-family:var(--font-mono); font-size:12px; color:var(--ink-dim); }
+
+  .divider{ height:1px; background:var(--border); border:none; margin:2px 0; }
+  .muted{ color:var(--ink-faint); }
+  .small{ font-size:12px; }
+  .stack{ display:flex; flex-direction:column; gap:10px; }
+  .inline-list{ display:flex; flex-wrap:wrap; gap:8px; }
+  .tag-editable{ display:flex; align-items:center; gap:8px; background:var(--surface-2); border:1px solid var(--border); border-radius:6px; padding:6px 8px 6px 12px; font-size:12.5px; }
+  .tag-editable b{ font-family:var(--font-mono); }
+  .order-btns{ display:flex; flex-direction:column; }
+  .order-btns button{ border:none; background:none; color:var(--ink-faint); padding:0 4px; line-height:1; }
+  .order-btns button:hover{ color:var(--ink); }
+  .diff-old{ text-decoration:line-through; color:var(--danger); opacity:.75; }
+  .diff-new{ color:var(--success); font-weight:700; }
+  code.k{ background:var(--surface-2); padding:1px 5px; border-radius:4px; font-family:var(--font-mono); font-size:11.5px; }
+  ::placeholder{ color:var(--ink-faint); }
+</style>
+
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">生管</div>
+      <div class="brand-text"><b>流程管理台</b><span>PROCESS TRACE</span></div>
+    </div>
+    <nav class="nav" id="nav"></nav>
+    <div class="sidebar-foot">資料儲存於伺服器，同一網段所有裝置共用、即時同步。</div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <h1 id="view-title">總覽</h1>
+        <p id="view-sub">工單、站別與過站狀態一覽</p>
+      </div>
+      <div id="topbar-actions"></div>
+    </header>
+
+    <section class="view" id="view-dashboard"></section>
+    <section class="view" id="view-master" hidden></section>
+    <section class="view" id="view-stations" hidden></section>
+    <section class="view" id="view-transit" hidden></section>
+    <section class="view" id="view-ai" hidden></section>
+    <section class="view" id="view-exceptions" hidden></section>
+    <section class="view" id="view-stats" hidden></section>
+    <section class="view" id="view-history" hidden></section>
+  </main>
+</div>
+
+<script>
+"use strict";
+
+/* ============================= ICONS ============================= */
+const ICONS = {
+  dashboard: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>',
+  box: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg>',
+  route: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="18" r="2.4"/><path d="M5 8.4V13a4 4 0 0 0 4 4h6"/></svg>',
+  transit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h13"/><path d="M12 6l7 6-7 6"/></svg>',
+  spark: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5L18 18M18 6l-2.5 2.5M8.5 15.5L6 18"/><circle cx="12" cy="12" r="2.6"/></svg>',
+  alert: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l10 18H2L12 3z"/><path d="M12 10v4"/><circle cx="12" cy="17.2" r="0.6" fill="currentColor"/></svg>',
+  chart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V10M12 20V4M20 20v-7"/></svg>',
+  history: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l4 2"/></svg>',
+  check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M4 12l5 5L20 6"/></svg>',
+  cross: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  warn: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 4l9 16H3L12 4z"/><path d="M12 10v4"/><circle cx="12" cy="17" r="0.5" fill="currentColor"/></svg>',
+  plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>',
+  up: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 15l6-6 6 6"/></svg>',
+  down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 9l6 6 6-6"/></svg>',
+  trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>',
+};
+function icon(name){ return ICONS[name] || ""; }
+
+/* ============================= BUSINESS LOGIC (PFMLogic) =============================
+   Pure functions — no DOM, no global `state` — unit-tested in pfm-logic.test.js
+   via Node's test runner (`node --test`). Each takes an explicit `ctx`
+   ({ products, workOrders, stations, exceptionTypes, records }); the app wires
+   these against the live `state` via thin wrappers further down. Keep this
+   block byte-for-byte in sync with the standalone pfm-logic.js used by the
+   test suite — it is the same source, inlined so the artifact stays a single
+   self-contained file. */
+const ABNORMAL_KEYWORDS = ["不良", "異常", "NG", "ng", "故障", "報廢", "退回", "不合格", "瑕疵"];
+
+const FIELD_LABELS = {
+  product: ["產品名稱", "產品"], workOrder: ["工單號碼", "工單"], operator: ["操作人員", "人員", "作業人員"],
+  station: ["目前站別", "發生站別", "站別"], qty: ["本次完成數量", "異常數量", "完成數量", "數量"],
+  result: ["結果"], problemType: ["問題類型"], followUp: ["後續處理", "後續站別", "後續"],
+  reason: ["原因", "跳站原因"], date: ["日期"], time: ["時間"],
+};
+
+const PFMLogic = (function(){
+  function productById(ctx, id) { return ctx.products.find(p => p.id === id); }
+  function productByName(ctx, name) { return ctx.products.find(p => p.name === name); }
+  function woById(ctx, id) { return ctx.workOrders.find(w => w.id === id); }
+  function woByNo(ctx, no) { return ctx.workOrders.find(w => w.no === no); }
+  function stationSeq(ctx) { return ctx.stations.map(s => s.name); }
+  function stationByName(ctx, name) { return ctx.stations.find(s => s.name === name); }
+  function exTypeByName(ctx, name) { return ctx.exceptionTypes.find(e => e.type === name); }
+
+  function activeRecordsFor(ctx, woId) {
+    return ctx.records.filter(r => r.workOrderId === woId && !r.superseded).sort((a, b) => a.createdAt - b.createdAt);
+  }
+
+  /* Replay a work order's records against the configured station sequence to
+     derive per-station queue levels, completed qty and current position. */
+  function replay(ctx, woId) {
+    const wo = woById(ctx, woId);
+    const seq = stationSeq(ctx);
+    const arrived = {}, departed = {};
+    if (seq.length) arrived[seq[0]] = wo ? wo.plannedQty : 0;
+    let completed = 0;
+    const pendingExceptions = [];
+    const log = activeRecordsFor(ctx, woId);
+    log.forEach(r => {
+      if (r.type === "normal") {
+        departed[r.station] = (departed[r.station] || 0) + r.qty;
+        const idx = seq.indexOf(r.station);
+        if (idx >= 0 && idx === seq.length - 1) { completed += r.qty; }
+        else if (idx >= 0) { const nxt = seq[idx + 1]; arrived[nxt] = (arrived[nxt] || 0) + r.qty; }
+      } else if (r.type === "skip") {
+        // Nothing has "arrived" at the skip-to station through the normal
+        // sequence, so the qty is drawn from wherever the batch currently
+        // sits (earliest active queue first), then behaves like a normal
+        // pass from the skip-to station onward.
+        let remaining = r.qty;
+        for (const name of seq) {
+          if (remaining <= 0) break;
+          const here = Math.max((arrived[name] || 0) - (departed[name] || 0), 0);
+          if (here <= 0) continue;
+          const take = Math.min(here, remaining);
+          departed[name] = (departed[name] || 0) + take;
+          remaining -= take;
+        }
+        const idx = seq.indexOf(r.station);
+        if (idx >= 0 && idx === seq.length - 1) { completed += r.qty; }
+        else if (idx >= 0) { const nxt = seq[idx + 1]; arrived[nxt] = (arrived[nxt] || 0) + r.qty; }
+      } else if (r.type === "exception") {
+        departed[r.station] = (departed[r.station] || 0) + r.qty;
+        arrived[r.targetStation] = (arrived[r.targetStation] || 0) + r.qty;
+        pendingExceptions.push(r);
+      }
+    });
+    const queues = seq.map(name => ({ name, qty: Math.max((arrived[name] || 0) - (departed[name] || 0), 0) }))
+      .filter(q => q.qty > 0);
+    return { seq, arrived, departed, completed, queues, pendingExceptions, log };
+  }
+
+  function available(ctx, woId, station) {
+    const r = replay(ctx, woId);
+    return Math.max((r.arrived[station] || 0) - (r.departed[station] || 0), 0);
+  }
+
+  // Total qty still "in process" somewhere in the work order's queues. Used to
+  // bound a skip's quantity, since a skip-to station has no "arrived" qty of
+  // its own to check against — the batch is drawn from wherever it sits.
+  function totalInProcess(ctx, woId) {
+    return replay(ctx, woId).queues.reduce((sum, q) => sum + q.qty, 0);
+  }
+
+  function woProgress(ctx, woId) {
+    const wo = woById(ctx, woId);
+    const r = replay(ctx, woId);
+    const pct = wo && wo.plannedQty ? Math.min(100, Math.round((r.completed / wo.plannedQty) * 100)) : 0;
+    let currentLabel;
+    if (r.completed >= (wo ? wo.plannedQty : 0) && wo && wo.plannedQty > 0) currentLabel = "已完工";
+    else if (r.queues.length) currentLabel = r.queues.map(q => q.name).join(" / ");
+    else currentLabel = r.seq[0] || "尚未設站";
+    return { ...r, pct, currentLabel };
+  }
+
+  function parseFreeText(text) {
+    const fields = {};
+    const lines = text.split(/\r?\n/);
+    lines.forEach(line => {
+      const m = line.match(/^\s*[◆\-\*•]?\s*([^:：]{1,12})[:：]\s*(.+?)\s*$/);
+      if (!m) return;
+      const rawLabel = m[1].trim(); const value = m[2].trim();
+      for (const key in FIELD_LABELS) {
+        if (FIELD_LABELS[key].some(lbl => rawLabel === lbl || rawLabel.endsWith(lbl))) {
+          fields[key] = value; break;
+        }
+      }
+    });
+    return fields;
+  }
+
+  function runDiagnostics(ctx, fields) {
+    const diags = [];
+    const add = (status, title, msg) => diags.push({ status, title, msg });
+
+    let product = null;
+    if (!fields.product) add("fail", "缺少「產品名稱」欄位", "請填寫產品名稱，需先於「產品 / 工單」建立資料才能登記過站。");
+    else {
+      product = productByName(ctx, fields.product);
+      if (!product) add("fail", `查無產品「${fields.product}」`, "此產品尚未建立，請先至「產品 / 工單」新增，或確認名稱是否輸入正確。");
+      else add("pass", "產品存在", "已於系統中找到對應產品資料。");
+    }
+
+    let wo = null;
+    if (!fields.workOrder) add("fail", "缺少「工單號碼」欄位", "每次過站都必須指定工單，請補上工單號碼。");
+    else {
+      wo = woByNo(ctx, fields.workOrder);
+      if (!wo) add("fail", `查無工單「${fields.workOrder}」`, "請確認工單號碼是否輸入正確，或先建立此工單。");
+      else if (product && wo.productId !== product.id) add("fail", "工單與產品不相符", `工單「${wo.no}」對應的產品是「${(productById(ctx, wo.productId) || {}).name}」，與輸入的產品「${fields.product}」不一致，請確認是否選錯工單或產品。`);
+      else add("pass", "工單存在且與產品相符", "已核對工單資料。");
+    }
+
+    let station = null;
+    let stationIsSkip = false;
+    if (!fields.station) add("fail", "缺少「站別」欄位", "請填寫目前 / 發生站別。");
+    else {
+      station = stationByName(ctx, fields.station);
+      if (!station) add("fail", `站別「${fields.station}」尚未設定`, "請先至「站別設定」建立此站別，或確認名稱與已設定站別是否一致（含全形/半形差異）。");
+      else if (wo) {
+        const prog = woProgress(ctx, wo.id);
+        const expected = prog.queues.length ? prog.queues.map(q => q.name) : [prog.seq[0]];
+        const isExpected = expected.includes(fields.station);
+        const isExceptionReceive = prog.pendingExceptions.some(e => e.targetStation === fields.station);
+        if (isExpected || isExceptionReceive) { add("pass", "站別符合製程順序", `工單目前應於「${expected.join("、")}」過站，輸入站別相符。`); }
+        else {
+          if (fields.reason) { stationIsSkip = true; add("warn", "偵測到跳站，已附原因", `目前應於「${expected.join("、")}」過站，但填寫至「${fields.station}」；已記錄跳站原因：「${fields.reason}」。`); }
+          else add("fail", "跳過必要站別但未填寫原因", `工單目前應於「${expected.join("、")}」過站，直接填入「${fields.station}」視為跳站，請補上原因欄位，或修正為正確站別。`);
+        }
+      } else add("warn", "無法核對站別順序", "缺少有效工單，暫無法比對製程順序。");
+    }
+
+    const resultAbnormal = ABNORMAL_KEYWORDS.some(k => (fields.result || "").includes(k));
+    const looksAbnormal = !!(fields.problemType || resultAbnormal);
+    // The example format often states the problem type only inside "結果"
+    // (e.g. 結果：Block 不良) without a separate 問題類型 line — fall back to it.
+    let effectiveProblemType = fields.problemType || "";
+    if (!effectiveProblemType && resultAbnormal) effectiveProblemType = fields.result;
+    if (looksAbnormal) {
+      if (!effectiveProblemType) add("fail", "偵測到異常結果但缺少「問題類型」", "結果顯示為異常，請填寫問題類型（或直接於「結果」欄位寫明問題類型）以利分流。");
+      else {
+        const ex = exTypeByName(ctx, effectiveProblemType);
+        if (!ex) add("fail", `問題類型「${effectiveProblemType}」尚未設定分支`, "請先至「站別設定」建立此問題類型對應的後續處理站別，或確認名稱是否與已設定的問題類型一致。");
+        else {
+          const followUp = fields.followUp || ex.targetStationName;
+          const matches = followUp === ex.targetStationName || followUp.includes(ex.targetStationName) || ex.targetStationName.includes(followUp);
+          if (!matches) add("warn", "後續站別與設定不符", `問題類型「${effectiveProblemType}」預設應轉入「${ex.targetStationName}」，輸入為「${followUp}」，請確認是否手動調整。`);
+          else add("pass", "異常分支設定正確", `問題類型「${effectiveProblemType}」將轉入「${ex.targetStationName}」。`);
+        }
+      }
+    }
+
+    const effectiveType = looksAbnormal ? "exception" : (stationIsSkip ? "skip" : "normal");
+
+    const qtyNum = parseInt(fields.qty, 10);
+    if (!fields.qty || isNaN(qtyNum) || qtyNum <= 0) add("fail", "數量錯誤", "數量必須是大於 0 的整數，請確認是否誤填文字、單位或負數。");
+    else if (wo && station) {
+      // A skip-to station has no "arrived" qty of its own to check against —
+      // the batch is drawn from wherever it currently sits — so bound it by
+      // the work order's total in-process qty instead of that station's queue.
+      const avail = stationIsSkip ? totalInProcess(ctx, wo.id) : available(ctx, wo.id, station.name);
+      const availLabel = stationIsSkip ? "工單目前總在製數量" : `「${station.name}」目前可用數量`;
+      if (qtyNum > avail) add("fail", "數量超過可過站數量", `${availLabel}為 ${avail} 件，輸入的 ${qtyNum} 件超過上限，請確認是否重複登記或數量填錯。`);
+      else add("pass", "數量在可過站範圍內", `${availLabel} ${avail} 件，本次登記 ${qtyNum} 件。`);
+    } else add("warn", "數量格式正確，但無法核對上限", "缺少有效工單或站別，暫無法比對可過站數量。");
+
+    if (!fields.date && !fields.time) add("warn", "未填寫日期／時間", "將自動帶入系統目前時間戳記。");
+    else add("pass", "日期／時間已提供", "將以輸入內容記錄，仍會保留系統實際送出時間供追查。");
+
+    if (wo) {
+      const prog = woProgress(ctx, wo.id);
+      if (prog.currentLabel === "已完工") add("fail", "此工單已完工", "已完工工單不得再登記過站，如需更正請至「修正紀錄」。");
+    }
+
+    return { diags, product, wo, station, qtyNum, looksAbnormal, effectiveProblemType, effectiveType };
+  }
+
+  return {
+    ABNORMAL_KEYWORDS, FIELD_LABELS,
+    productById, productByName, woById, woByNo, stationSeq, stationByName, exTypeByName,
+    activeRecordsFor, replay, available, totalInProcess, woProgress, parseFreeText, runDiagnostics,
+  };
+})();
+
+/* ============================= STATE (server-backed) =============================
+   Data now lives on a shared backend (server.js) so every device sees the same
+   工單/站別/紀錄 — this is a multi-user deployment, not per-browser localStorage.
+   `state` is a local cache of the server's data: refreshed after every write
+   and polled periodically so other people's changes show up here too. */
+const uid = (p) => p + "_" + Math.random().toString(36).slice(2,9);
+let state = { products: [], workOrders: [], stations: [], exceptionTypes: [], records: [] };
+
+async function api(path, method, body){
+  const resp = await fetch(path, {
+    method: method || "GET",
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  let data = null;
+  try{ data = await resp.json(); }catch(e){ /* no body */ }
+  if (!resp.ok) throw new Error((data && data.error) || `伺服器錯誤（${resp.status}）`);
+  return data;
+}
+
+async function refreshState(){
+  state = await api("/api/state");
+}
+
+function isTypingInForm(){
+  const a = document.activeElement;
+  return a && ["INPUT","TEXTAREA","SELECT"].includes(a.tagName);
+}
+
+async function withServerSync(action){
+  try{
+    await action();
+    await refreshState();
+    render();
+    return true;
+  }catch(err){
+    alert(err.message || "操作失敗，請稍後再試");
+    return false;
+  }
+}
+
+/* ============================= HELPERS ============================= */
+function fmtDate(ts){ const d = new Date(ts); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+function fmtTime(ts){ const d = new Date(ts); return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0"); }
+function fmtDateTime(ts){ return fmtDate(ts)+" "+fmtTime(ts); }
+function escapeHtml(s){ return String(s??"").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+/* Business logic (station replay, quantity limits, AI diagnostics) lives in
+   PFMLogic — a pure module unit-tested by pfm-logic.test.js — and is wired
+   here against the live `state`. See pfm-logic.js for the tested source. */
+function productById(id){ return PFMLogic.productById(state, id); }
+function productByName(name){ return PFMLogic.productByName(state, name); }
+function woById(id){ return PFMLogic.woById(state, id); }
+function woByNo(no){ return PFMLogic.woByNo(state, no); }
+function stationSeq(){ return PFMLogic.stationSeq(state); }
+function stationByName(name){ return PFMLogic.stationByName(state, name); }
+function exTypeByName(name){ return PFMLogic.exTypeByName(state, name); }
+function activeRecordsFor(woId){ return PFMLogic.activeRecordsFor(state, woId); }
+function replay(woId){ return PFMLogic.replay(state, woId); }
+function available(woId, station){ return PFMLogic.available(state, woId, station); }
+function totalInProcess(woId){ return PFMLogic.totalInProcess(state, woId); }
+function woProgress(woId){ return PFMLogic.woProgress(state, woId); }
+function parseFreeText(text){ return PFMLogic.parseFreeText(text); }
+function runDiagnostics(fields){ return PFMLogic.runDiagnostics(state, fields); }
+
+/* ============================= NAV ============================= */
+const NAV = [
+  { id:"dashboard", label:"總覽", icon:"dashboard", title:"總覽", sub:"工單、站別與過站狀態一覽" },
+  { id:"master", label:"產品 / 工單", icon:"box", title:"產品與工單", sub:"建立產品資料與生產工單" },
+  { id:"stations", label:"站別設定", icon:"route", title:"站別設定", sub:"設定製程順序與異常處理分支" },
+  { id:"transit", label:"過站登記", icon:"transit", title:"過站登記", sub:"記錄人員、產品、數量與站別" },
+  { id:"ai", label:"智慧輸入檢查", icon:"spark", title:"智慧輸入檢查", sub:"貼上紀錄文字，自動核對欄位是否正確" },
+  { id:"exceptions", label:"異常追蹤", icon:"alert", title:"異常追蹤", sub:"問題類型與後續站別接收狀態" },
+  { id:"stats", label:"統計報表", icon:"chart", title:"統計報表", sub:"依產品、工單、站別統計數量" },
+  { id:"history", label:"修正紀錄", icon:"history", title:"修正紀錄", sub:"追查輸入錯誤與異動前後對照" },
+];
+let currentView = "dashboard";
+
+function renderNav(){
+  const nav = document.getElementById("nav");
+  nav.innerHTML = NAV.map(n => {
+    let count = "";
+    if (n.id==="exceptions"){ const c = state.records.filter(r=>r.type==="exception" && !r.superseded && !r.received).length; if (c) count = c; }
+    if (n.id==="master"){ count = state.workOrders.length; }
+    return `<button class="nav-item ${currentView===n.id?"active":""}" data-nav="${n.id}">${icon(n.icon)}<span>${n.label}</span>${count!==""?`<span class="count">${count}</span>`:""}</button>`;
+  }).join("");
+  nav.querySelectorAll("[data-nav]").forEach(b => b.addEventListener("click", () => { currentView = b.dataset.nav; render(); }));
+}
+
+/* ============================= RENDER ROOT ============================= */
+function render(){
+  renderNav();
+  const meta = NAV.find(n=>n.id===currentView);
+  document.getElementById("view-title").textContent = meta.title;
+  document.getElementById("view-sub").textContent = meta.sub;
+  NAV.forEach(n => { document.getElementById("view-"+n.id).hidden = (n.id !== currentView); });
+  ({
+    dashboard: renderDashboard, master: renderMaster, stations: renderStations,
+    transit: renderTransit, ai: renderAI, exceptions: renderExceptions,
+    stats: renderStats, history: renderHistory,
+  })[currentView]();
+}
+
+/* ============================= DASHBOARD ============================= */
+function renderDashboard(){
+  const el = document.getElementById("view-dashboard");
+  const totalWO = state.workOrders.length;
+  const inProgress = state.workOrders.filter(w => woProgress(w.id).currentLabel !== "已完工").length;
+  const done = totalWO - inProgress;
+  const pendingEx = state.records.filter(r=>r.type==="exception" && !r.superseded && !r.received).length;
+
+  el.innerHTML = `
+    <div class="grid cols-4">
+      <div class="card kpi accent"><div class="kpi-num num">${totalWO}</div><div class="kpi-label">生產工單總數</div></div>
+      <div class="card kpi warn"><div class="kpi-num num">${inProgress}</div><div class="kpi-label">生產中</div></div>
+      <div class="card kpi ok"><div class="kpi-num num">${done}</div><div class="kpi-label">已完工</div></div>
+      <div class="card kpi danger"><div class="kpi-num num">${pendingEx}</div><div class="kpi-label">異常待接收</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>工單生產進度</h2><span class="hint">每張工單目前所在站別與完成比例</span></div>
+      <div class="card-pad stack" id="dash-travelers"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>最近操作紀錄</h2><span class="hint">依時間倒序，最新 12 筆</span></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>時間</th><th>工單</th><th>產品</th><th>站別</th><th>類型</th><th>數量</th><th>操作人員</th></tr></thead>
+          <tbody id="dash-recent"></tbody>
+        </table>
+      </div>
+    </div>
+  `;
+
+  const travWrap = document.getElementById("dash-travelers");
+  if (!state.workOrders.length){
+    travWrap.innerHTML = `<div class="empty-row muted">尚未建立任何工單，請先至「產品 / 工單」建立。</div>`;
+  } else {
+    travWrap.innerHTML = state.workOrders.map(wo => travelerCard(wo)).join("");
+  }
+
+  const recent = state.records.filter(r=>!r.superseded).sort((a,b)=>b.createdAt-a.createdAt).slice(0,12);
+  document.getElementById("dash-recent").innerHTML = recent.length ? recent.map(r => {
+    const wo = woById(r.workOrderId);
+    const typeChip = r.type==="normal" ? `<span class="chip success">正常過站</span>` : r.type==="skip" ? `<span class="chip warning">跳站</span>` : `<span class="chip danger">異常過站</span>`;
+    return `<tr><td class="num small">${escapeHtml(r.date)} ${escapeHtml(r.time)}</td><td class="num">${escapeHtml(wo?wo.no:"—")}</td><td>${escapeHtml(r.productName)}</td><td>${escapeHtml(r.station)}</td><td>${typeChip}</td><td class="num">${r.qty}</td><td>${escapeHtml(r.operator)}</td></tr>`;
+  }).join("") : `<tr><td colspan="7" class="empty-row">尚無過站紀錄</td></tr>`;
+}
+
+function travelerCard(wo){
+  const prod = productById(wo.productId);
+  const prog = woProgress(wo.id);
+  const seq = prog.seq;
+  const doneAll = prog.currentLabel === "已完工";
+  const nodesHtml = seq.map((name, idx) => {
+    const q = prog.queues.find(x=>x.name===name);
+    const hasException = prog.pendingExceptions.some(e=>e.targetStation===name);
+    let cls = "";
+    if (doneAll) cls = "done";
+    else if (hasException) cls = "exception";
+    else if (q) cls = "current";
+    else if (prog.completed>0 && idx < seq.length) cls = "";
+    const lineDone = doneAll || (q && idx>0);
+    return `<div class="pipe-node ${cls}"><div class="pipe-dot"></div><div class="pipe-label">${escapeHtml(name)}</div>${q?`<div class="pipe-qty">${q.qty} 件</div>`:""}</div>` +
+           (idx < seq.length-1 ? `<div class="pipe-line ${doneAll?"done":""}"></div>` : "");
+  }).join("");
+  const statusChip = doneAll ? `<span class="chip success"><span class="dot"></span>已完工</span>` :
+    prog.pendingExceptions.length ? `<span class="chip danger"><span class="dot"></span>等待${escapeHtml(prog.pendingExceptions[prog.pendingExceptions.length-1].targetStation)}接收</span>` :
+    `<span class="chip info"><span class="dot"></span>生產中：${escapeHtml(prog.currentLabel)}</span>`;
+  return `
+    <div class="card traveler">
+      <div class="traveler-top">
+        <div>
+          <span class="traveler-id">${escapeHtml(wo.no)}</span>
+          <span class="traveler-meta">　${escapeHtml(prod?prod.name:"未指定產品")} · 預計 ${wo.plannedQty} 件 · 已完成 ${prog.completed} 件</span>
+        </div>
+        ${statusChip}
+      </div>
+      <div class="pipeline">${nodesHtml || '<span class="muted small">尚未設定站別</span>'}</div>
+      <div class="progress-bar"><i style="width:${prog.pct}%"></i></div>
+    </div>
+  `;
+}
+
+/* ============================= MASTER (products & work orders) ============================= */
+function renderMaster(){
+  const el = document.getElementById("view-master");
+  el.innerHTML = `
+    <div class="grid cols-2">
+      <div class="card">
+        <div class="card-head"><h2>建立產品資料</h2></div>
+        <div class="card-pad stack">
+          <div class="form-row">
+            <div class="field"><label>產品名稱 <span class="req">*</span></label><input type="text" id="f-prod-name" placeholder="例：80CS"></div>
+            <div class="field"><label>規格 / 備註</label><input type="text" id="f-prod-spec" placeholder="選填"></div>
+          </div>
+          <div><button class="btn accent" id="btn-add-product">${icon("plus")}新增產品</button></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>建立生產工單</h2><span class="hint">需先建立產品</span></div>
+        <div class="card-pad stack">
+          <div class="form-row">
+            <div class="field"><label>產品 <span class="req">*</span></label>
+              <select id="f-wo-product">${state.products.map(p=>`<option value="${p.id}">${escapeHtml(p.name)}</option>`).join("") || `<option value="">請先建立產品</option>`}</select>
+            </div>
+            <div class="field"><label>工單號碼 <span class="req">*</span></label><input type="text" id="f-wo-no" placeholder="例：WO-20260808-02"></div>
+            <div class="field"><label>預計生產數量 <span class="req">*</span></label><input type="number" id="f-wo-qty" min="1" placeholder="件"></div>
+          </div>
+          <div><button class="btn accent" id="btn-add-wo" ${state.products.length?"":"disabled"}>${icon("plus")}建立工單</button></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>產品清單</h2><span class="hint">${state.products.length} 項</span></div>
+      <div class="table-wrap"><table><thead><tr><th>產品名稱</th><th>規格 / 備註</th><th>相關工單數</th></tr></thead>
+      <tbody>${state.products.length ? state.products.map(p=>`<tr><td><b>${escapeHtml(p.name)}</b></td><td class="muted">${escapeHtml(p.spec||"—")}</td><td class="num">${state.workOrders.filter(w=>w.productId===p.id).length}</td></tr>`).join("") : `<tr><td colspan="3" class="empty-row">尚未建立產品</td></tr>`}</tbody></table></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>工單清單</h2><span class="hint">${state.workOrders.length} 張</span></div>
+      <div class="table-wrap"><table><thead><tr><th>工單號碼</th><th>產品</th><th>預計數量</th><th>已完成</th><th>目前狀態</th><th>建立時間</th></tr></thead>
+      <tbody>${state.workOrders.length ? state.workOrders.map(w=>{
+        const prod = productById(w.productId); const prog = woProgress(w.id);
+        const chip = prog.currentLabel==="已完工" ? `<span class="chip success">已完工</span>` : `<span class="chip info">${escapeHtml(prog.currentLabel)}</span>`;
+        return `<tr><td class="num"><b>${escapeHtml(w.no)}</b></td><td>${escapeHtml(prod?prod.name:"—")}</td><td class="num">${w.plannedQty}</td><td class="num">${prog.completed}</td><td>${chip}</td><td class="num small muted">${fmtDateTime(w.createdAt)}</td></tr>`;
+      }).join("") : `<tr><td colspan="6" class="empty-row">尚未建立工單</td></tr>`}</tbody></table></div>
+    </div>
+  `;
+
+  document.getElementById("btn-add-product").addEventListener("click", () => {
+    const name = document.getElementById("f-prod-name").value.trim();
+    const spec = document.getElementById("f-prod-spec").value.trim();
+    if (!name){ alert("請輸入產品名稱"); return; }
+    withServerSync(() => api("/api/products", "POST", { name, spec }));
+  });
+
+  const btnAddWo = document.getElementById("btn-add-wo");
+  if (btnAddWo) btnAddWo.addEventListener("click", () => {
+    const productId = document.getElementById("f-wo-product").value;
+    const no = document.getElementById("f-wo-no").value.trim();
+    const plannedQty = parseInt(document.getElementById("f-wo-qty").value, 10);
+    if (!productId){ alert("請選擇產品"); return; }
+    if (!no){ alert("請輸入工單號碼"); return; }
+    withServerSync(() => api("/api/workorders", "POST", { productId, no, plannedQty, createdBy: "操作人員" }));
+  });
+}
+
+/* ============================= STATIONS ============================= */
+function renderStations(){
+  const el = document.getElementById("view-stations");
+  el.innerHTML = `
+    <div class="grid cols-2">
+      <div class="card">
+        <div class="card-head"><h2>製程站別順序</h2><span class="hint">依序為正常過站流程</span></div>
+        <div class="card-pad stack">
+          <div class="inline-list" id="station-list"></div>
+          <div class="form-row">
+            <div class="field" style="flex:2"><label>新增站別</label><input type="text" id="f-station-name" placeholder="例：包裝站"></div>
+            <div class="field" style="flex:0 0 auto; align-self:flex-end"><button class="btn accent" id="btn-add-station">${icon("plus")}新增</button></div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>異常處理分支</h2><span class="hint">問題類型 → 後續處理站別</span></div>
+        <div class="card-pad stack">
+          <div class="table-wrap"><table><thead><tr><th>問題類型</th><th>後續站別</th><th></th></tr></thead>
+          <tbody id="ex-type-list"></tbody></table></div>
+          <div class="form-row">
+            <div class="field"><label>問題類型</label><input type="text" id="f-ex-type" placeholder="例：Block 不良"></div>
+            <div class="field"><label>後續處理站別</label><select id="f-ex-target">${state.stations.map(s=>`<option>${escapeHtml(s.name)}</option>`).join("")}</select></div>
+            <div class="field" style="flex:0 0 auto; align-self:flex-end"><button class="btn accent" id="btn-add-extype">${icon("plus")}新增</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById("station-list").innerHTML = state.stations.map((s, idx) => `
+    <div class="tag-editable">
+      <span class="eyebrow num">${String(idx+1).padStart(2,"0")}</span><b>${escapeHtml(s.name)}</b>
+      <div class="order-btns">
+        <button data-up="${s.id}" ${idx===0?"disabled":""}>${icon("up")}</button>
+        <button data-down="${s.id}" ${idx===state.stations.length-1?"disabled":""}>${icon("down")}</button>
+      </div>
+      <button class="btn ghost sm" data-del-station="${s.id}">${icon("trash")}</button>
+    </div>`).join("") || `<span class="muted small">尚未設定站別</span>`;
+
+  document.getElementById("ex-type-list").innerHTML = state.exceptionTypes.length ? state.exceptionTypes.map(e => `
+    <tr><td><b>${escapeHtml(e.type)}</b></td><td><span class="chip info">${escapeHtml(e.targetStationName)}</span></td>
+    <td><button class="btn ghost sm" data-del-ex="${e.id}">${icon("trash")}</button></td></tr>`).join("")
+    : `<tr><td colspan="3" class="empty-row">尚未設定異常分支</td></tr>`;
+
+  document.getElementById("btn-add-station").addEventListener("click", () => {
+    const name = document.getElementById("f-station-name").value.trim();
+    if (!name){ alert("請輸入站別名稱"); return; }
+    withServerSync(() => api("/api/stations", "POST", { name }));
+  });
+  el.querySelectorAll("[data-up]").forEach(b=>b.addEventListener("click",()=>{
+    const i = state.stations.findIndex(s=>s.id===b.dataset.up);
+    if (i<=0) return;
+    const ids = state.stations.map(s=>s.id);
+    [ids[i-1], ids[i]] = [ids[i], ids[i-1]];
+    withServerSync(() => api("/api/stations/reorder", "POST", { ids }));
+  }));
+  el.querySelectorAll("[data-down]").forEach(b=>b.addEventListener("click",()=>{
+    const i = state.stations.findIndex(s=>s.id===b.dataset.down);
+    if (i>=state.stations.length-1) return;
+    const ids = state.stations.map(s=>s.id);
+    [ids[i+1], ids[i]] = [ids[i], ids[i+1]];
+    withServerSync(() => api("/api/stations/reorder", "POST", { ids }));
+  }));
+  el.querySelectorAll("[data-del-station]").forEach(b=>b.addEventListener("click",()=>{
+    if (!confirm("刪除此站別？已產生的過站紀錄仍會保留原始站別名稱。")) return;
+    withServerSync(() => api("/api/stations/" + b.dataset.delStation, "DELETE"));
+  }));
+  document.getElementById("btn-add-extype").addEventListener("click", () => {
+    const type = document.getElementById("f-ex-type").value.trim();
+    const targetStationName = document.getElementById("f-ex-target").value;
+    if (!type){ alert("請輸入問題類型"); return; }
+    if (!targetStationName){ alert("請先設定至少一個站別"); return; }
+    withServerSync(() => api("/api/exceptiontypes", "POST", { type, targetStationName }));
+  });
+  el.querySelectorAll("[data-del-ex]").forEach(b=>b.addEventListener("click",()=>{
+    withServerSync(() => api("/api/exceptiontypes/" + b.dataset.delEx, "DELETE"));
+  }));
+}
+
+/* ============================= TRANSIT (過站登記) ============================= */
+let transitDraft = { type: "normal" };
+
+function renderTransit(){
+  const el = document.getElementById("view-transit");
+  const woOptions = state.workOrders.filter(w => woProgress(w.id).currentLabel !== "已完工");
+  el.innerHTML = `
+    <div class="grid cols-2">
+      <div class="card">
+        <div class="card-head"><h2>登記過站</h2><span class="hint">送出前將再次核對資料</span></div>
+        <div class="card-pad stack">
+          <div class="form-row">
+            <div class="field"><label>工單 <span class="req">*</span></label>
+              <select id="t-wo">${woOptions.length ? woOptions.map(w=>`<option value="${w.id}">${escapeHtml(w.no)}（${escapeHtml(productById(w.productId)?.name||"—")}）</option>`).join("") : `<option value="">尚無可登記工單</option>`}</select>
+            </div>
+            <div class="field"><label>操作人員 <span class="req">*</span></label><input type="text" id="t-operator" placeholder="姓名"></div>
+          </div>
+          <div class="form-row">
+            <div class="field"><label>站別 <span class="req">*</span></label><select id="t-station">${state.stations.map(s=>`<option>${escapeHtml(s.name)}</option>`).join("")}</select></div>
+            <div class="field"><label>本次數量 <span class="req">*</span></label><input type="number" id="t-qty" min="1"></div>
+          </div>
+          <div class="field">
+            <label>過站類型</label>
+            <div class="radio-row" id="t-type-row">
+              <label class="radio-chip checked"><input type="radio" name="ttype" value="normal" checked>正常過站</label>
+              <label class="radio-chip"><input type="radio" name="ttype" value="skip">跳站（需填原因）</label>
+              <label class="radio-chip"><input type="radio" name="ttype" value="exception">異常過站</label>
+            </div>
+          </div>
+          <div id="t-conditional"></div>
+          <div class="form-row">
+            <div class="field"><label>日期</label><input type="date" id="t-date"></div>
+            <div class="field"><label>時間</label><input type="time" id="t-time"></div>
+          </div>
+          <div><button class="btn accent" id="btn-submit-transit" ${woOptions.length?"":"disabled"}>${icon("check")}核對並送出</button></div>
+          <div id="t-result"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>各站可用數量</h2><span class="hint">選定工單後顯示目前站別庫存</span></div>
+        <div class="card-pad" id="t-station-avail"><span class="muted small">請先選擇工單</span></div>
+      </div>
+    </div>
+  `;
+
+  const now = new Date();
+  document.getElementById("t-date").value = fmtDate(now.getTime());
+  document.getElementById("t-time").value = fmtTime(now.getTime());
+
+  function refreshConditional(){
+    const type = document.querySelector('input[name=ttype]:checked').value;
+    const cond = document.getElementById("t-conditional");
+    if (type === "skip"){
+      cond.innerHTML = `<div class="field"><label>跳站原因 <span class="req">*</span></label><input type="text" id="t-reason" placeholder="說明為何跳過必要站別"></div>`;
+    } else if (type === "exception"){
+      cond.innerHTML = `
+        <div class="form-row">
+          <div class="field"><label>問題類型 <span class="req">*</span></label>
+            <select id="t-problem">${state.exceptionTypes.length ? state.exceptionTypes.map(e=>`<option value="${escapeHtml(e.type)}" data-target="${escapeHtml(e.targetStationName)}">${escapeHtml(e.type)}</option>`).join("") : `<option value="">尚未設定問題類型</option>`}</select>
+          </div>
+          <div class="field"><label>後續處理站別</label><input type="text" id="t-target" readonly></div>
+        </div>`;
+      const sel = document.getElementById("t-problem");
+      const syncTarget = () => { const opt = sel.selectedOptions[0]; document.getElementById("t-target").value = opt ? (opt.dataset.target||"") : ""; };
+      if (sel){ sel.addEventListener("change", syncTarget); syncTarget(); }
+    } else {
+      cond.innerHTML = "";
+    }
+  }
+  el.querySelectorAll('input[name=ttype]').forEach(r => r.addEventListener("change", () => {
+    el.querySelectorAll(".radio-chip").forEach(c=>c.classList.toggle("checked", c.querySelector("input").checked));
+    refreshConditional();
+  }));
+  refreshConditional();
+
+  function refreshAvail(){
+    const woId = document.getElementById("t-wo").value;
+    const box = document.getElementById("t-station-avail");
+    if (!woId){ box.innerHTML = `<span class="muted small">請先選擇工單</span>`; return; }
+    const prog = woProgress(woId);
+    box.innerHTML = `
+      <div class="stack">
+        ${state.stations.map(s => {
+          const qty = (prog.arrived[s.name]||0) - (prog.departed[s.name]||0);
+          return `<div class="stat-bar-row"><div class="name">${escapeHtml(s.name)}</div><div class="stat-bar-track"><div class="stat-bar-fill" style="width:${prog.seq[0]?Math.min(100, (Math.max(qty,0)/ (woById(woId).plannedQty||1))*100):0}%"></div></div><div class="stat-bar-num num">${Math.max(qty,0)}</div></div>`;
+        }).join("")}
+        <hr class="divider">
+        <div class="small muted">目前狀態：<b>${escapeHtml(prog.currentLabel)}</b>　已完成 <b class="num">${prog.completed}</b> / ${woById(woId).plannedQty} 件</div>
+      </div>`;
+  }
+  const woSel = document.getElementById("t-wo");
+  if (woSel) woSel.addEventListener("change", refreshAvail);
+  refreshAvail();
+
+  const btn = document.getElementById("btn-submit-transit");
+  if (btn) btn.addEventListener("click", () => submitTransit());
+}
+
+async function submitTransit(){
+  const woId = document.getElementById("t-wo").value;
+  const operator = document.getElementById("t-operator").value.trim();
+  const station = document.getElementById("t-station").value;
+  const qty = parseInt(document.getElementById("t-qty").value, 10);
+  const type = document.querySelector('input[name=ttype]:checked').value;
+  const date = document.getElementById("t-date").value;
+  const time = document.getElementById("t-time").value;
+  const resultBox = document.getElementById("t-result");
+
+  const errors = [];
+  if (!woId) errors.push("請選擇工單");
+  if (!operator) errors.push("請填寫操作人員");
+  if (!station) errors.push("請選擇站別");
+  if (!qty || qty <= 0) errors.push("數量須為正整數");
+
+  const wo = woById(woId);
+  const seq = stationSeq();
+  const prog = wo ? woProgress(woId) : null;
+  let reason = "", problemType = "", targetStation = "";
+
+  if (type === "skip"){
+    reason = (document.getElementById("t-reason")?.value || "").trim();
+    if (!reason) errors.push("跳站需填寫原因");
+  }
+
+  if (wo && qty > 0){
+    // A skip-to station has no "arrived" qty of its own to check against —
+    // the batch is drawn from wherever it currently sits — so bound it by
+    // the work order's total in-process qty instead of that station's queue.
+    if (type === "skip"){
+      const avail = totalInProcess(woId);
+      if (qty > avail) errors.push(`數量超過工單目前總在製數量（目前在製 ${avail} 件）`);
+    } else {
+      const avail = available(woId, station);
+      if (qty > avail) errors.push(`數量超過「${station}」可過站數量（目前可用 ${avail} 件）`);
+    }
+  }
+  if (type === "exception"){
+    problemType = document.getElementById("t-problem")?.value || "";
+    targetStation = document.getElementById("t-target")?.value || "";
+    if (!problemType) errors.push("請選擇問題類型");
+    if (!targetStation) errors.push("問題類型尚未對應後續站別，請至站別設定新增");
+  }
+  if (type === "normal" && wo){
+    const idx = seq.indexOf(station);
+    const expected = prog.queues.length ? prog.queues[0].name : seq[0];
+    if (idx>=0 && expected && station !== expected && !(prog.pendingExceptions.some(e=>e.targetStation===station))){
+      errors.push(`目前應於「${expected}」過站，若確定要跳至「${station}」請改選「跳站」並填寫原因`);
+    }
+  }
+
+  if (errors.length){
+    resultBox.innerHTML = `<div class="diag-row fail"><div class="diag-icon">${icon("cross")}</div><div><div class="diag-title">送出前核對未通過</div><div class="diag-msg">${errors.map(escapeHtml).join("；")}</div></div></div>`;
+    return;
+  }
+
+  // Client-side checks above give fast feedback; the server re-validates
+  // against its own current state (source of truth) before writing — this
+  // is what actually protects against two people submitting at once.
+  let rec;
+  try{
+    rec = await api("/api/records", "POST", {
+      workOrderId: woId, operator, station, qty, type, reason, problemType, targetStation,
+      date: date || fmtDate(Date.now()), time: time || fmtTime(Date.now()),
+    });
+  }catch(err){
+    // No state change happened — safe to write straight into the box we
+    // already have a live reference to, without re-rendering the view.
+    resultBox.innerHTML = `<div class="diag-row fail"><div class="diag-icon">${icon("cross")}</div><div><div class="diag-title">送出前核對未通過</div><div class="diag-msg">${escapeHtml(err.message)}</div></div></div>`;
+    return;
+  }
+
+  // A record was written — refresh and re-render so the "各站可用數量" panel
+  // reflects the new totals, then re-query #t-result: render() just rebuilt
+  // the whole view, so the `resultBox` reference from above is now detached.
+  await refreshState();
+  render();
+  document.getElementById("t-result").innerHTML = ticketHtml(rec, wo);
+}
+
+function ticketHtml(rec, wo){
+  const rows = [
+    ["登記結果", rec.type==="normal"?"正常過站":rec.type==="skip"?"跳站過站":"異常過站"],
+    ["產品", rec.productName], ["工單", wo.no], ["操作人員", rec.operator], ["發生站別", rec.station],
+  ];
+  if (rec.type==="skip") rows.push(["跳站原因", rec.reason]);
+  if (rec.type==="exception"){ rows.push(["問題類型", rec.problemType], ["異常數量", rec.qty+" 件"], ["後續站別", rec.targetStation]); }
+  else { rows.push(["數量", rec.qty+" 件"]); }
+  rows.push(["狀態", rec.type==="exception" ? `等待${rec.targetStation}接收` : "已登記"]);
+  return `<div class="ticket">${rows.map(([k,v])=>`<div class="t-row"><span class="t-key">${escapeHtml(k)}</span><span class="t-val">${escapeHtml(v)}</span></div>`).join("")}
+    <div class="t-row"><span class="t-key">系統紀錄</span><span class="t-val">${escapeHtml(rec.date)} ${escapeHtml(rec.time)} 已保留原始資料</span></div></div>`;
+}
+
+/* ============================= AI SMART INPUT ============================= */
+function renderAI(){
+  const el = document.getElementById("view-ai");
+  el.innerHTML = `
+    <div class="grid cols-2">
+      <div class="card">
+        <div class="card-head"><h2>貼上過站紀錄文字</h2><span class="hint">支援「欄位：內容」逐行格式</span></div>
+        <div class="card-pad stack">
+          <textarea id="ai-input" rows="12" placeholder="產品名稱：80CS\n工單號碼：WO-20260808-01\n操作人員：王小明\n目前站別：接 Block\n本次完成數量：20件\n結果：Block 不良\n後續處理：清洗站"></textarea>
+          <div class="form-row">
+            <button class="btn accent" id="btn-analyze">${icon("spark")}分析並核對欄位</button>
+            <button class="btn ghost" id="btn-fill-sample">帶入範例文字</button>
+          </div>
+          <div class="small muted">系統會逐項核對：產品／工單是否存在、操作人員是否填寫、站別是否符合製程順序、數量是否超過可過站數量、異常分支是否完整設定。此核對為內建規則引擎，全程在本機瀏覽器執行，不會傳送資料到外部伺服器。</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>核對結果</h2><span class="hint" id="ai-summary-hint"></span></div>
+        <div class="card-pad stack" id="ai-output"><span class="muted small">尚未分析，請於左側貼上內容並按下「分析並核對欄位」。</span></div>
+      </div>
+    </div>
+    <div class="card" id="ai-history-card" hidden>
+      <div class="card-head"><h2>相關歷史紀錄</h2><span class="hint">同工單／同人員的既有紀錄，供追查輸入錯誤來源</span></div>
+      <div class="table-wrap"><table><thead><tr><th>時間</th><th>站別</th><th>類型</th><th>數量</th><th>操作人員</th></tr></thead><tbody id="ai-history-body"></tbody></table></div>
+    </div>
+  `;
+
+  document.getElementById("btn-fill-sample").addEventListener("click", () => {
+    document.getElementById("ai-input").value = "產品名稱：80CS\n工單號碼：WO-20260808-01\n操作人員：王小明\n目前站別：接 Block\n本次完成數量：20件\n結果：Block 不良\n後續處理：清洗站";
+  });
+  document.getElementById("btn-analyze").addEventListener("click", analyzeAIInput);
+}
+
+let lastDiagnosis = null;
+function analyzeAIInput(){
+  const text = document.getElementById("ai-input").value;
+  const fields = parseFreeText(text);
+  const result = runDiagnostics(fields);
+  lastDiagnosis = { fields, result };
+  const fails = result.diags.filter(d=>d.status==="fail").length;
+  const warns = result.diags.filter(d=>d.status==="warn").length;
+
+  document.getElementById("ai-summary-hint").textContent = fails ? `發現 ${fails} 項錯誤` : warns ? `${warns} 項提醒，其餘正常` : "全部核對通過";
+
+  const out = document.getElementById("ai-output");
+  out.innerHTML = result.diags.map(d => `
+    <div class="diag-row ${d.status}">
+      <div class="diag-icon">${icon(d.status==="pass"?"check":d.status==="fail"?"cross":"warn")}</div>
+      <div><div class="diag-title">${escapeHtml(d.title)}</div><div class="diag-msg">${escapeHtml(d.msg)}</div></div>
+    </div>`).join("");
+
+  if (!fails){
+    const previewRec = {
+      productName: fields.product, station: fields.station,
+      operator: fields.operator, qty: result.qtyNum, reason: fields.reason || "",
+      type: result.effectiveType,
+      problemType: result.effectiveProblemType || "", targetStation: fields.followUp || (exTypeByName(result.effectiveProblemType||"")||{}).targetStationName || "",
+      date: fields.date || fmtDate(Date.now()), time: fields.time || fmtTime(Date.now()),
+    };
+    out.innerHTML += `<div class="divider" style="margin:14px 0"></div>` + ticketHtml(previewRec, result.wo) +
+      `<div style="margin-top:12px"><button class="btn accent" id="btn-commit-ai">${icon("check")}確認登記此筆紀錄</button></div>`;
+    document.getElementById("btn-commit-ai").addEventListener("click", () => commitAIRecord(fields, result));
+  }
+
+  const histCard = document.getElementById("ai-history-card");
+  if (result.wo || fields.operator){
+    const rows = state.records.filter(r => !r.superseded && ((result.wo && r.workOrderId===result.wo.id) || (fields.operator && r.operator===fields.operator))).sort((a,b)=>b.createdAt-a.createdAt).slice(0,8);
+    histCard.hidden = rows.length===0;
+    document.getElementById("ai-history-body").innerHTML = rows.map(r => {
+      const t = r.type==="normal"?`<span class="chip success">正常</span>`:r.type==="skip"?`<span class="chip warning">跳站</span>`:`<span class="chip danger">異常</span>`;
+      return `<tr><td class="num small">${escapeHtml(r.date)} ${escapeHtml(r.time)}</td><td>${escapeHtml(r.station)}</td><td>${t}</td><td class="num">${r.qty}</td><td>${escapeHtml(r.operator)}</td></tr>`;
+    }).join("");
+  } else { histCard.hidden = true; }
+}
+
+async function commitAIRecord(fields, result){
+  const type = result.effectiveType;
+  const targetStation = fields.followUp || (exTypeByName(result.effectiveProblemType||"")||{}).targetStationName || "";
+  try{
+    await api("/api/records", "POST", {
+      workOrderId: result.wo.id, operator: fields.operator, station: fields.station,
+      qty: result.qtyNum, type, reason: fields.reason || "",
+      problemType: result.effectiveProblemType || "", targetStation,
+      date: fields.date || fmtDate(Date.now()), time: fields.time || fmtTime(Date.now()),
+    });
+  }catch(err){
+    document.getElementById("ai-output").innerHTML += `<div class="divider" style="margin:14px 0"></div><div class="diag-row fail"><div class="diag-icon">${icon("cross")}</div><div><div class="diag-title">登記失敗</div><div class="diag-msg">${escapeHtml(err.message)}</div></div></div>`;
+    return;
+  }
+  await refreshState();
+  currentView = "ai";
+  render();
+  document.getElementById("ai-input").value = "";
+  document.getElementById("ai-output").innerHTML = `<div class="diag-row pass"><div class="diag-icon">${icon("check")}</div><div><div class="diag-title">已登記完成</div><div class="diag-msg">紀錄已寫入系統，可於總覽或異常追蹤查看最新狀態。</div></div></div>`;
+}
+
+/* ============================= EXCEPTIONS ============================= */
+function renderExceptions(){
+  const el = document.getElementById("view-exceptions");
+  const list = state.records.filter(r => r.type==="exception" && !r.superseded).sort((a,b)=>b.createdAt-a.createdAt);
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-head"><h2>異常過站紀錄</h2><span class="hint">${list.length} 筆</span></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>時間</th><th>工單</th><th>產品</th><th>發生站別</th><th>問題類型</th><th>數量</th><th>操作人員</th><th>後續站別</th><th>狀態</th><th></th></tr></thead>
+        <tbody>${list.length ? list.map(r => {
+          const wo = woById(r.workOrderId);
+          return `<tr>
+            <td class="num small">${escapeHtml(r.date)} ${escapeHtml(r.time)}</td>
+            <td class="num">${escapeHtml(wo?wo.no:"—")}</td>
+            <td>${escapeHtml(r.productName)}</td>
+            <td>${escapeHtml(r.station)}</td>
+            <td><span class="chip danger">${escapeHtml(r.problemType)}</span></td>
+            <td class="num">${r.qty}</td>
+            <td>${escapeHtml(r.operator)}</td>
+            <td>${escapeHtml(r.targetStation)}</td>
+            <td>${r.received ? `<span class="chip success">已接收</span>` : `<span class="chip warning">等待接收</span>`}</td>
+            <td>${r.received ? "" : `<button class="btn sm accent" data-receive="${r.id}">標記已接收</button>`}</td>
+          </tr>`;
+        }).join("") : `<tr><td colspan="10" class="empty-row">目前沒有異常紀錄</td></tr>`}</tbody>
+      </table></div>
+    </div>
+  `;
+  el.querySelectorAll("[data-receive]").forEach(b => b.addEventListener("click", () => {
+    withServerSync(() => api("/api/records/" + b.dataset.receive + "/receive", "POST"));
+  }));
+}
+
+/* ============================= STATS ============================= */
+function renderStats(){
+  const el = document.getElementById("view-stats");
+  const byProduct = state.products.map(p => {
+    const wos = state.workOrders.filter(w=>w.productId===p.id);
+    const qty = wos.reduce((s,w)=>s + woProgress(w.id).completed, 0);
+    return { name: p.name, qty, wos: wos.length };
+  });
+  const byWO = state.workOrders.map(w => ({ name: w.no, qty: woProgress(w.id).completed, planned: w.plannedQty }));
+  const byStation = state.stations.map(s => {
+    const qty = state.records.filter(r=>!r.superseded && r.station===s.name).reduce((sum,r)=>sum+r.qty,0);
+    const exQty = state.records.filter(r=>!r.superseded && r.station===s.name && r.type==="exception").reduce((sum,r)=>sum+r.qty,0);
+    return { name: s.name, qty, exQty };
+  });
+  const maxProduct = Math.max(1, ...byProduct.map(x=>x.qty));
+  const maxWO = Math.max(1, ...byWO.map(x=>x.planned));
+  const maxStation = Math.max(1, ...byStation.map(x=>x.qty));
+
+  const barBlock = (rows, keyMax, extra) => rows.length ? rows.map(r => `
+    <div class="stat-bar-row">
+      <div class="name" title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</div>
+      <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.min(100,(r.qty/keyMax)*100)}%"></div></div>
+      <div class="stat-bar-num num">${r.qty}${extra?extra(r):""}</div>
+    </div>`).join("") : `<div class="empty-row muted">尚無資料</div>`;
+
+  el.innerHTML = `
+    <div class="grid cols-3">
+      <div class="card">
+        <div class="card-head"><h2>依產品統計</h2><span class="hint">已完成數量</span></div>
+        <div class="card-pad">${barBlock(byProduct, maxProduct, r=>` / ${r.wos} 張工單`)}</div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>依工單統計</h2><span class="hint">完成 / 預計</span></div>
+        <div class="card-pad">${barBlock(byWO.map(r=>({name:r.name, qty:r.qty})), maxWO, (r)=>{ const wo=byWO.find(x=>x.name===r.name); return ` / ${wo.planned}`; })}</div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>依站別統計</h2><span class="hint">通過總數（含異常）</span></div>
+        <div class="card-pad">${barBlock(byStation, maxStation, r=>r.exQty?` (異常 ${r.exQty})`:"")}</div>
+      </div>
+    </div>
+  `;
+}
+
+/* ============================= HISTORY / CORRECTIONS ============================= */
+function renderHistory(){
+  const el = document.getElementById("view-history");
+  const all = state.records.slice().sort((a,b)=>b.createdAt-a.createdAt);
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-head"><h2>全部過站紀錄</h2><span class="hint">已完成紀錄不可直接覆蓋，更正將保留新舊對照</span></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>時間</th><th>工單</th><th>站別</th><th>類型</th><th>數量</th><th>操作人員</th><th>狀態</th><th></th></tr></thead>
+        <tbody>${all.length ? all.map(r => {
+          const wo = woById(r.workOrderId);
+          const t = r.type==="normal"?`<span class="chip success">正常</span>`:r.type==="skip"?`<span class="chip warning">跳站</span>`:`<span class="chip danger">異常</span>`;
+          const status = r.superseded ? `<span class="chip neutral">已被更正</span>` : r.correctionOf ? `<span class="chip info">更正版本</span>` : `<span class="chip neutral">原始</span>`;
+          return `<tr>
+            <td class="num small">${escapeHtml(r.date)} ${escapeHtml(r.time)}</td>
+            <td class="num">${escapeHtml(wo?wo.no:"—")}</td>
+            <td>${escapeHtml(r.station)}</td><td>${t}</td><td class="num">${r.qty}</td><td>${escapeHtml(r.operator)}</td>
+            <td>${status}</td>
+            <td>${r.superseded ? "" : `<button class="btn ghost sm" data-correct="${r.id}">更正</button>`}</td>
+          </tr>`;
+        }).join("") : `<tr><td colspan="8" class="empty-row">尚無紀錄</td></tr>`}</tbody>
+      </table></div>
+    </div>
+    <div class="card" id="correction-card" hidden>
+      <div class="card-head"><h2>更正紀錄</h2><span class="hint">原始資料將保留，供追查操作人員與原因</span></div>
+      <div class="card-pad stack" id="correction-body"></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>更正歷史對照</h2><span class="hint">修改前後的欄位差異</span></div>
+      <div class="card-pad stack" id="correction-log"></div>
+    </div>
+  `;
+  el.querySelectorAll("[data-correct]").forEach(b => b.addEventListener("click", () => openCorrectionForm(b.dataset.correct)));
+
+  const corrected = all.filter(r => r.correctionOf);
+  const logBox = document.getElementById("correction-log");
+  logBox.innerHTML = corrected.length ? corrected.map(r => {
+    const orig = state.records.find(o => o.id === r.correctionOf);
+    const fieldsToCompare = ["station","qty","operator","type","reason","problemType","targetStation","date","time"];
+    const diffs = fieldsToCompare.filter(f => orig && String(orig[f]??"") !== String(r[f]??""));
+    return `<div class="card" style="box-shadow:none">
+      <div class="card-pad small">
+        <div><b>${escapeHtml(r.productName)}</b> · ${escapeHtml(r.station)} · 更正人員：${escapeHtml(r.correctedBy||"—")} · ${fmtDateTime(r.correctedAt||r.createdAt)}</div>
+        ${diffs.length ? `<ul style="margin:8px 0 0; padding-left:18px">${diffs.map(f=>`<li><code class="k">${f}</code>：<span class="diff-old">${escapeHtml(orig[f])}</span> → <span class="diff-new">${escapeHtml(r[f])}</span></li>`).join("")}</ul>` : `<div class="muted">無欄位差異</div>`}
+      </div></div>`;
+  }).join("") : `<div class="empty-row muted">尚無更正紀錄</div>`;
+}
+
+function openCorrectionForm(recId){
+  const rec = state.records.find(r=>r.id===recId);
+  if (!rec) return;
+  document.getElementById("correction-card").hidden = false;
+  const body = document.getElementById("correction-body");
+  body.innerHTML = `
+    <div class="small muted">原始紀錄由 <b>${escapeHtml(rec.operator)}</b> 於 ${fmtDateTime(rec.createdAt)} 建立，原始內容將完整保留於下方對照表。</div>
+    <div class="form-row">
+      <div class="field"><label>站別</label><select id="c-station">${state.stations.map(s=>`<option ${s.name===rec.station?"selected":""}>${escapeHtml(s.name)}</option>`).join("")}</select></div>
+      <div class="field"><label>數量</label><input type="number" id="c-qty" value="${rec.qty}"></div>
+      <div class="field"><label>操作人員</label><input type="text" id="c-operator" value="${escapeHtml(rec.operator)}"></div>
+    </div>
+    <div class="field"><label>更正人員 <span class="req">*</span>（本次執行更正的人）</label><input type="text" id="c-by" placeholder="姓名"></div>
+    <div><button class="btn accent" id="btn-save-correction">${icon("check")}儲存更正（保留原始資料）</button> <button class="btn ghost" id="btn-cancel-correction">取消</button></div>
+  `;
+  document.getElementById("btn-cancel-correction").addEventListener("click", () => { document.getElementById("correction-card").hidden = true; });
+  document.getElementById("btn-save-correction").addEventListener("click", () => {
+    const correctedBy = document.getElementById("c-by").value.trim();
+    if (!correctedBy){ alert("請填寫更正人員"); return; }
+    const qty = parseInt(document.getElementById("c-qty").value, 10);
+    if (!qty || qty<=0){ alert("數量須為正整數"); return; }
+    withServerSync(() => api(`/api/records/${rec.id}/correct`, "POST", {
+      station: document.getElementById("c-station").value,
+      qty, operator: document.getElementById("c-operator").value.trim(), correctedBy,
+    })).then(ok => { if (ok) document.getElementById("correction-card").hidden = true; });
+  });
+}
+
+/* ============================= INIT ============================= */
+async function init(){
+  try{
+    await refreshState();
+  }catch(err){
+    document.getElementById("view-title").textContent = "無法連線到伺服器";
+    document.getElementById("view-sub").textContent = "請確認 server.js 是否已啟動，以及網址是否正確（" + err.message + "）";
+    return;
+  }
+  render();
+  // Poll for other users' changes. Skip the re-render (not the fetch) while
+  // someone is mid-typing so a background refresh never yanks their cursor.
+  setInterval(async () => {
+    try{
+      await refreshState();
+      if (!isTypingInForm()) render();
+    }catch(err){ /* transient network hiccup — try again next tick */ }
+  }, 4000);
+}
+init();
+</script>
