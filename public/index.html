@@ -769,12 +769,19 @@ function travelerCard(wo){
 }
 
 /* ============================= MASTER (products & work orders) ============================= */
+let showProductForm = false;
+let showWoForm = false;
+
 function renderMaster(){
   const el = document.getElementById("view-master");
   el.innerHTML = `
     <div class="grid cols-2">
       <div class="card">
-        <div class="card-head"><h2>建立產品資料</h2><span class="hint">可選擇要跑哪個製程，之後也能再改</span></div>
+        <div class="card-head">
+          <h2>建立產品資料</h2>
+          <button class="btn ${showProductForm?"ghost":"accent"} sm" id="btn-toggle-product-form">${icon("plus")}${showProductForm?"取消":"新增產品"}</button>
+        </div>
+        ${showProductForm ? `
         <div class="card-pad stack">
           <div class="form-row">
             <div class="field"><label>產品名稱 <span class="req">*</span></label><input type="text" id="f-prod-name" placeholder="例：80CS"></div>
@@ -787,11 +794,15 @@ function renderMaster(){
               ${state.processes.map(p=>`<option value="${p.id}">${escapeHtml(p.name)}（${stationSeq(p.id).join(" → ") || "尚無站別"}）</option>`).join("")}
             </select>
           </div>
-          <div><button class="btn accent" id="btn-add-product">${icon("plus")}新增產品</button></div>
-        </div>
+          <div><button class="btn accent" id="btn-add-product">${icon("plus")}確認新增</button></div>
+        </div>` : ""}
       </div>
       <div class="card">
-        <div class="card-head"><h2>建立生產工單</h2><span class="hint">需先建立產品</span></div>
+        <div class="card-head">
+          <h2>建立生產工單</h2>
+          <button class="btn ${showWoForm?"ghost":"accent"} sm" id="btn-toggle-wo-form" ${state.products.length?"":"disabled"}>${icon("plus")}${showWoForm?"取消":"建立工單"}</button>
+        </div>
+        ${showWoForm ? `
         <div class="card-pad stack">
           <div class="form-row">
             <div class="field"><label>產品 <span class="req">*</span></label>
@@ -800,8 +811,8 @@ function renderMaster(){
             <div class="field"><label>工單號碼 <span class="req">*</span></label><input type="text" id="f-wo-no" placeholder="例：WO-20260808-02"></div>
             <div class="field"><label>預計生產數量 <span class="req">*</span></label><input type="number" id="f-wo-qty" min="1" placeholder="件"></div>
           </div>
-          <div><button class="btn accent" id="btn-add-wo" ${state.products.length?"":"disabled"}>${icon("plus")}建立工單</button></div>
-        </div>
+          <div><button class="btn accent" id="btn-add-wo">${icon("plus")}確認建立</button></div>
+        </div>` : `<div class="card-pad"><span class="muted small">需先建立產品</span></div>`}
       </div>
     </div>
 
@@ -830,26 +841,37 @@ function renderMaster(){
     </div>
   `;
 
-  document.getElementById("btn-add-product").addEventListener("click", () => {
+  document.getElementById("btn-toggle-product-form").addEventListener("click", () => {
+    showProductForm = !showProductForm;
+    render();
+  });
+  const btnAddProduct = document.getElementById("btn-add-product");
+  if (btnAddProduct) btnAddProduct.addEventListener("click", async () => {
     const name = document.getElementById("f-prod-name").value.trim();
     const spec = document.getElementById("f-prod-spec").value.trim();
     const processId = document.getElementById("f-prod-process").value || null;
     if (!name){ alert("請輸入產品名稱"); return; }
-    withServerSync(() => api("/api/products", "POST", { name, spec, processId }));
+    const ok = await withServerSync(() => api("/api/products", "POST", { name, spec, processId }));
+    if (ok){ showProductForm = false; render(); }
   });
 
   el.querySelectorAll("[data-set-process]").forEach(sel => sel.addEventListener("change", () => {
     withServerSync(() => api(`/api/products/${sel.dataset.setProcess}/process`, "POST", { processId: sel.value || null }));
   }));
 
+  document.getElementById("btn-toggle-wo-form").addEventListener("click", () => {
+    showWoForm = !showWoForm;
+    render();
+  });
   const btnAddWo = document.getElementById("btn-add-wo");
-  if (btnAddWo) btnAddWo.addEventListener("click", () => {
+  if (btnAddWo) btnAddWo.addEventListener("click", async () => {
     const productId = document.getElementById("f-wo-product").value;
     const no = document.getElementById("f-wo-no").value.trim();
     const plannedQty = parseInt(document.getElementById("f-wo-qty").value, 10);
     if (!productId){ alert("請選擇產品"); return; }
     if (!no){ alert("請輸入工單號碼"); return; }
-    withServerSync(() => api("/api/workorders", "POST", { productId, no, plannedQty, createdBy: "操作人員" }));
+    const ok = await withServerSync(() => api("/api/workorders", "POST", { productId, no, plannedQty, createdBy: "操作人員" }));
+    if (ok){ showWoForm = false; render(); }
   });
 }
 
