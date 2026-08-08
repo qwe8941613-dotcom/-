@@ -210,10 +210,12 @@
   .diag-row.pass{ border-left:3px solid var(--success); }
   .diag-row.fail{ border-left:3px solid var(--danger); }
   .diag-row.warn{ border-left:3px solid var(--warning); }
+  .diag-row.info{ border-left:3px solid var(--info); }
   .diag-icon{ flex:0 0 auto; width:18px; height:18px; margin-top:1px; }
   .diag-row.pass .diag-icon{ color:var(--success); }
   .diag-row.fail .diag-icon{ color:var(--danger); }
   .diag-row.warn .diag-icon{ color:var(--warning); }
+  .diag-row.info .diag-icon{ color:var(--info); }
   .diag-title{ font-weight:700; font-size:12.8px; }
   .diag-msg{ color:var(--ink-dim); font-size:12.3px; margin-top:2px; }
 
@@ -1039,12 +1041,19 @@ function renderAI(){
             <button class="btn accent" id="btn-analyze">${icon("spark")}分析並核對欄位</button>
             <button class="btn ghost" id="btn-fill-sample">帶入範例文字</button>
           </div>
-          <div class="small muted">系統會逐項核對：產品／工單是否存在、操作人員是否填寫、站別是否符合製程順序、數量是否超過可過站數量、異常分支是否完整設定。此核對為內建規則引擎，全程在本機瀏覽器執行，不會傳送資料到外部伺服器。</div>
+          <div class="small muted">系統會逐項核對：產品／工單是否存在、操作人員是否填寫、站別是否符合製程順序、數量是否超過可過站數量、異常分支是否完整設定。此核對為內建規則引擎，資料不會送到外部伺服器。</div>
         </div>
       </div>
       <div class="card">
         <div class="card-head"><h2>核對結果</h2><span class="hint" id="ai-summary-hint"></span></div>
         <div class="card-pad stack" id="ai-output"><span class="muted small">尚未分析，請於左側貼上內容並按下「分析並核對欄位」。</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>AI 語意複核（選用）</h2><span class="hint">找出規則引擎judge不出來的可疑之處，例如錯字、簡稱、語意不清</span></div>
+      <div class="card-pad stack">
+        <div><button class="btn ghost" id="btn-ai-review">${icon("spark")}請 AI 額外複核一次</button></div>
+        <div id="ai-review-output" class="small"></div>
       </div>
     </div>
     <div class="card" id="ai-history-card" hidden>
@@ -1057,6 +1066,20 @@ function renderAI(){
     document.getElementById("ai-input").value = "產品名稱：80CS\n工單號碼：WO-20260808-01\n操作人員：王小明\n目前站別：接 Block\n本次完成數量：20件\n結果：Block 不良\n後續處理：清洗站";
   });
   document.getElementById("btn-analyze").addEventListener("click", analyzeAIInput);
+  document.getElementById("btn-ai-review").addEventListener("click", runAiSemanticReview);
+}
+
+async function runAiSemanticReview(){
+  const text = document.getElementById("ai-input").value;
+  const out = document.getElementById("ai-review-output");
+  if (!text.trim()){ out.innerHTML = `<span class="muted">請先在左側貼上內容。</span>`; return; }
+  out.innerHTML = `<span class="muted">AI 複核中...</span>`;
+  try{
+    const { review } = await api("/api/ai-review", "POST", { text });
+    out.innerHTML = `<div class="diag-row info"><div class="diag-icon">${icon("spark")}</div><div><div class="diag-title">AI 複核結果</div><div class="diag-msg">${escapeHtml(review)}</div></div></div>`;
+  }catch(err){
+    out.innerHTML = `<div class="diag-row warn"><div class="diag-icon">${icon("warn")}</div><div><div class="diag-title">AI 複核無法使用</div><div class="diag-msg">${escapeHtml(err.message)}</div></div></div>`;
+  }
 }
 
 let lastDiagnosis = null;

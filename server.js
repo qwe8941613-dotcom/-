@@ -12,8 +12,31 @@ const DATA_DIR = process.env.DATA_DIR || __dirname;
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 const DATA_FILE = path.join(DATA_DIR, "data.json");
 
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+const AI_REVIEW_MAX_LENGTH = 2000;
+const AI_REVIEW_RATE_LIMIT = 20; // 每 IP 每小時，跟 ai-chat-web 用同一套邏輯
+const AI_REVIEW_RATE_WINDOW_MS = 60 * 60 * 1000;
+
+// 部署在 Render 這類平台時，真正的訪客 IP 在 X-Forwarded-For 裡。
+app.set("trust proxy", 1);
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
+
+const aiReviewBuckets = new Map();
+function checkAiReviewRateLimit(ip) {
+  const now = Date.now();
+  const entry = aiReviewBuckets.get(ip);
+  if (!entry || now > entry.resetAt) {
+    aiReviewBuckets.set(ip, { count: 1, resetAt: now + AI_REVIEW_RATE_WINDOW_MS });
+    return { ok: true };
+  }
+  if (entry.count >= AI_REVIEW_RATE_LIMIT) {
+    return { ok: false, retryAfterMinutes: Math.max(1, Math.ceil((entry.resetAt - now) / 60000)) };
+  }
+  entry.count += 1;
+  return { ok: true };
+}
 
 function uid(prefix) {
   return prefix + "_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -141,6 +164,79 @@ app.delete("/api/exceptiontypes/:id", (req, res) => {
   state.exceptionTypes = state.exceptionTypes.filter(e => e.id !== req.params.id);
   saveState(state);
   res.json({ ok: true });
+});
+
+/* Supplements the rule-based checks in PFMLogic.runDiagnostics (which are
+   exact/deterministic — product exists, qty within limits, etc.) with an AI
+   pass over things rules can't judge: typos in station/problem-type names,
+   ambiguous phrasing, or numbers that look "off" without breaking a hard
+   rule. Never the sole gate — the rule engine still runs regardless. */
+app.post("/api/ai-review", async (req, res) => {
+  if (!ANTHROPIC_API_KEY) {
+    return res.status(503).json({ error: "尚未設定 ANTHROPIC_API_KEY，AI 複核功能未啟用。" });
+  }
+  const text = (req.body.text || "").toString();
+  if (!text.trim()) return res.status(400).json({ error: "缺少要複核的內容" });
+  if (text.length > AI_REVIEW_MAX_LENGTH) {
+    return res.status(400).json({ error: `內容過長，單次最多 ${AI_REVIEW_MAX_LENGTH} 字（目前 ${text.length} 字）。` });
+  }
+
+  const limit = checkAiReviewRateLimit(req.ip);
+  if (!limit.ok) {
+    return res.status(429).json({ error: `AI 複核已達每小時 ${AI_REVIEW_RATE_LIMIT} 次上限，請約 ${limit.retryAfterMinutes} 分鐘後再試。` });
+  }
+
+  const activeWOs = state.workOrders
+    .map(w => ({ wo: w, prog: PFMLogic.woProgress(state, w.id) }))
+    .filter(x => x.prog.currentLabel !== "已完工");
+
+  const context = [
+    `已設定產品：${state.products.map(p => p.name).join("、") || "（無）"}`,
+    `已設定站別（依序）：${state.stations.map(s => s.name).join(" → ") || "（無）"}`,
+    `已設定問題類型與後續站別：${state.exceptionTypes.map(e => `${e.type}→${e.targetStationName}`).join("、") || "（無）"}`,
+    `生產中的工單：${activeWOs.map(x => `${x.wo.no}（目前應於「${x.prog.currentLabel}」過站，預計 ${x.wo.plannedQty} 件，已完成 ${x.prog.completed} 件）`).join("；") || "（無）"}`,
+  ].join("\n");
+
+  const prompt = `你是生產流程管理系統的複核助手。系統已經有一套規則引擎會檢查「產品/工單是否存在、數量是否超過可過站數量、站別順序是否正確」這類有標準答案的規則，你不需要重複做這些。
+
+你的工作是找出規則引擎抓不到、但看起來可疑的地方，例如：
+- 使用者輸入的站別、問題類型名稱，跟系統裡設定的名稱很像但拼法不同（可能是打錯字或簡稱）
+- 語意不清楚、有缺漏、或跟現有生產中工單的狀態對不起來的地方
+- 數量、日期等數字看起來不合理（但不一定違反明確規則）
+
+系統目前資料：
+${context}
+
+使用者輸入的原始內容：
+"""
+${text}
+"""
+
+請用繁體中文，最多 3 條，簡短條列你發現的疑慮。如果沒有發現任何額外疑慮，就只回覆「內容看起來清楚，未發現規則引擎之外的疑慮。」不要加開場白或結語。`;
+
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 300,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      return res.status(response.status).json({ error: data?.error?.message || "呼叫 AI 複核失敗" });
+    }
+    const review = data.content?.[0]?.text || "(無回應內容)";
+    res.json({ review });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 /* The one endpoint where two people acting at nearly the same time can
