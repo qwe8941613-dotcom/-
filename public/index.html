@@ -166,8 +166,16 @@
   td{ padding:10px 12px; border-bottom:1px solid var(--border); vertical-align:middle; }
   tr:last-child td{ border-bottom:none; }
   tbody tr:hover{ background:var(--surface-2); }
+  tr.clickable{ cursor:pointer; }
   .table-wrap{ overflow-x:auto; }
   .empty-row{ color:var(--ink-faint); font-style:normal; text-align:center; padding:26px 12px; }
+
+  .modal-overlay{ position:fixed; inset:0; background:rgba(10,14,12,.6); display:flex; align-items:center; justify-content:center; padding:24px; z-index:50; }
+  .modal-overlay[hidden]{ display:none; }
+  .modal-card{ width:100%; max-width:920px; max-height:90vh; overflow-y:auto; background:var(--surface); border-radius:12px; border:1px solid var(--border); box-shadow:0 20px 60px rgba(0,0,0,.4); }
+  .modal-head{ display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--surface); border-radius:12px 12px 0 0; }
+  .modal-head h2{ margin:0; font-size:15px; font-weight:800; }
+  .modal-body{ padding:20px; }
 
   .chip{ display:inline-flex; align-items:center; gap:5px; padding:3px 9px; border-radius:20px; font-size:11px; font-weight:700; }
   .chip.success{ background:var(--success-soft); color:var(--success); }
@@ -310,12 +318,21 @@
     <section class="view" id="view-dashboard"></section>
     <section class="view" id="view-master" hidden></section>
     <section class="view" id="view-stations" hidden></section>
-    <section class="view" id="view-transit" hidden></section>
     <section class="view" id="view-ai" hidden></section>
     <section class="view" id="view-exceptions" hidden></section>
     <section class="view" id="view-stats" hidden></section>
     <section class="view" id="view-history" hidden></section>
   </main>
+</div>
+
+<div class="modal-overlay" id="transit-modal-overlay" hidden>
+  <div class="modal-card">
+    <div class="modal-head">
+      <h2 id="transit-modal-title">登記過站</h2>
+      <button class="btn ghost sm" id="transit-modal-close" aria-label="關閉">✕</button>
+    </div>
+    <div class="modal-body" id="transit-modal-body"></div>
+  </div>
 </div>
 
 <script>
@@ -654,7 +671,6 @@ const NAV = [
   { id:"dashboard", label:"總覽", icon:"dashboard", title:"總覽", sub:"工單、站別與過站狀態一覽" },
   { id:"master", label:"產品 / 工單", icon:"box", title:"產品與工單", sub:"建立產品資料與生產工單" },
   { id:"stations", label:"站別設定", icon:"route", title:"站別設定", sub:"設定製程順序與異常處理分支" },
-  { id:"transit", label:"過站登記", icon:"transit", title:"過站登記", sub:"記錄人員、產品、數量與站別" },
   { id:"ai", label:"AI 助理", icon:"spark", title:"AI 助理", sub:"詢問目前生產狀況，AI 會依系統即時資料回答（唯讀，不會建立或修改紀錄）" },
   { id:"exceptions", label:"異常追蹤", icon:"alert", title:"異常追蹤", sub:"問題類型與後續站別接收狀態" },
   { id:"stats", label:"統計報表", icon:"chart", title:"統計報表", sub:"依產品、工單、站別統計數量" },
@@ -682,7 +698,7 @@ function render(){
   NAV.forEach(n => { document.getElementById("view-"+n.id).hidden = (n.id !== currentView); });
   ({
     dashboard: renderDashboard, master: renderMaster, stations: renderStations,
-    transit: renderTransit, ai: renderAI, exceptions: renderExceptions,
+    ai: renderAI, exceptions: renderExceptions,
     stats: renderStats, history: renderHistory,
   })[currentView]();
 }
@@ -833,15 +849,20 @@ function renderMaster(){
     </div>
 
     <div class="card">
-      <div class="card-head"><h2>工單清單</h2><span class="hint">${state.workOrders.length} 張</span></div>
+      <div class="card-head"><h2>工單清單</h2><span class="hint">點一筆工單即可登記過站</span></div>
       <div class="table-wrap"><table><thead><tr><th>工單號碼</th><th>產品</th><th>預計數量</th><th>已完成</th><th>目前狀態</th><th>建立時間</th></tr></thead>
       <tbody>${state.workOrders.length ? state.workOrders.map(w=>{
         const prod = productById(w.productId); const prog = woProgress(w.id);
-        const chip = prog.currentLabel==="已完工" ? `<span class="chip success">已完工</span>` : `<span class="chip info">${escapeHtml(prog.currentLabel)}</span>`;
-        return `<tr><td class="num"><b>${escapeHtml(w.no)}</b></td><td>${escapeHtml(prod?prod.name:"—")}</td><td class="num">${w.plannedQty}</td><td class="num">${prog.completed}</td><td>${chip}</td><td class="num small muted">${fmtDateTime(w.createdAt)}</td></tr>`;
+        const done = prog.currentLabel==="已完工";
+        const chip = done ? `<span class="chip success">已完工</span>` : `<span class="chip info">${escapeHtml(prog.currentLabel)}</span>`;
+        return `<tr class="${done?"":"clickable"}" ${done?"":`data-open-transit="${w.id}"`} title="${done?"":"點一下登記過站"}"><td class="num"><b>${escapeHtml(w.no)}</b></td><td>${escapeHtml(prod?prod.name:"—")}</td><td class="num">${w.plannedQty}</td><td class="num">${prog.completed}</td><td>${chip}</td><td class="num small muted">${fmtDateTime(w.createdAt)}</td></tr>`;
       }).join("") : `<tr><td colspan="6" class="empty-row">尚未建立工單</td></tr>`}</tbody></table></div>
     </div>
   `;
+
+  el.querySelectorAll("[data-open-transit]").forEach(tr => tr.addEventListener("click", () => {
+    openTransitModal(tr.dataset.openTransit);
+  }));
 
   document.getElementById("btn-toggle-product-form").addEventListener("click", () => {
     showProductForm = !showProductForm;
@@ -1069,52 +1090,65 @@ function wireStationDragAndDrop(el){
   });
 }
 
-/* ============================= TRANSIT (過站登記) ============================= */
-let transitDraft = { type: "normal" };
+/* ============================= TRANSIT MODAL (過站登記) =============================
+   Opened by clicking a work order row in 產品/工單's 工單清單 — the work order
+   is already fixed, so this only asks for what's actually needed at that
+   moment (站別/數量/人員), not a work-order picker. */
+function openTransitModal(woId){
+  const wo = woById(woId);
+  if (!wo) return;
+  const overlay = document.getElementById("transit-modal-overlay");
+  const prod = productById(wo.productId);
+  document.getElementById("transit-modal-title").textContent = `登記過站 － ${wo.no}（${prod ? prod.name : "未指定產品"}）`;
+  document.getElementById("transit-modal-body").innerHTML = transitFormHtml();
+  overlay.hidden = false;
+  wireTransitForm(woId);
+}
+function closeTransitModal(){
+  document.getElementById("transit-modal-overlay").hidden = true;
+  document.getElementById("transit-modal-body").innerHTML = "";
+}
+document.getElementById("transit-modal-close").addEventListener("click", closeTransitModal);
+document.getElementById("transit-modal-overlay").addEventListener("click", (e) => {
+  if (e.target.id === "transit-modal-overlay") closeTransitModal();
+});
 
-function renderTransit(){
-  const el = document.getElementById("view-transit");
-  const woOptions = state.workOrders.filter(w => woProgress(w.id).currentLabel !== "已完工");
-  el.innerHTML = `
+function transitFormHtml(){
+  return `
     <div class="grid cols-2">
-      <div class="card">
-        <div class="card-head"><h2>登記過站</h2><span class="hint">送出前將再次核對資料</span></div>
-        <div class="card-pad stack">
-          <div class="form-row">
-            <div class="field"><label>工單 <span class="req">*</span></label>
-              <select id="t-wo">${woOptions.length ? woOptions.map(w=>`<option value="${w.id}">${escapeHtml(w.no)}（${escapeHtml(productById(w.productId)?.name||"—")}）</option>`).join("") : `<option value="">尚無可登記工單</option>`}</select>
-            </div>
-            <div class="field"><label>操作人員 <span class="req">*</span></label><input type="text" id="t-operator" placeholder="姓名"></div>
-          </div>
-          <div class="form-row">
-            <div class="field"><label>站別 <span class="req">*</span></label><select id="t-station">${state.stations.map(s=>`<option>${escapeHtml(s.name)}</option>`).join("")}</select></div>
-            <div class="field"><label>本次數量 <span class="req">*</span></label><input type="number" id="t-qty" min="1"></div>
-          </div>
-          <div class="field">
-            <label>過站類型</label>
-            <div class="radio-row" id="t-type-row">
-              <label class="radio-chip checked"><input type="radio" name="ttype" value="normal" checked>正常過站</label>
-              <label class="radio-chip"><input type="radio" name="ttype" value="skip">跳站（需填原因）</label>
-              <label class="radio-chip"><input type="radio" name="ttype" value="exception">異常過站</label>
-            </div>
-          </div>
-          <div id="t-conditional"></div>
-          <div class="form-row">
-            <div class="field"><label>日期</label><input type="date" id="t-date"></div>
-            <div class="field"><label>時間</label><input type="time" id="t-time"></div>
-          </div>
-          <div><button class="btn accent" id="btn-submit-transit" ${woOptions.length?"":"disabled"}>${icon("check")}核對並送出</button></div>
-          <div id="t-result"></div>
+      <div class="stack">
+        <div class="form-row">
+          <div class="field"><label>操作人員 <span class="req">*</span></label><input type="text" id="t-operator" placeholder="姓名"></div>
+          <div class="field"><label>站別 <span class="req">*</span></label><select id="t-station">${state.stations.map(s=>`<option>${escapeHtml(s.name)}</option>`).join("")}</select></div>
         </div>
+        <div class="form-row">
+          <div class="field"><label>本次數量 <span class="req">*</span></label><input type="number" id="t-qty" min="1"></div>
+        </div>
+        <div class="field">
+          <label>過站類型</label>
+          <div class="radio-row" id="t-type-row">
+            <label class="radio-chip checked"><input type="radio" name="ttype" value="normal" checked>正常過站</label>
+            <label class="radio-chip"><input type="radio" name="ttype" value="skip">跳站（需填原因）</label>
+            <label class="radio-chip"><input type="radio" name="ttype" value="exception">異常過站</label>
+          </div>
+        </div>
+        <div id="t-conditional"></div>
+        <div class="form-row">
+          <div class="field"><label>日期</label><input type="date" id="t-date"></div>
+          <div class="field"><label>時間</label><input type="time" id="t-time"></div>
+        </div>
+        <div><button class="btn accent" id="btn-submit-transit">${icon("check")}核對並送出</button></div>
+        <div id="t-result"></div>
       </div>
-
-      <div class="card">
-        <div class="card-head"><h2>各站可用數量</h2><span class="hint">選定工單後顯示目前站別庫存</span></div>
-        <div class="card-pad" id="t-station-avail"><span class="muted small">請先選擇工單</span></div>
+      <div class="card" style="box-shadow:none">
+        <div class="card-head"><h2>各站可用數量</h2><span class="hint">目前站別庫存</span></div>
+        <div class="card-pad" id="t-station-avail"></div>
       </div>
     </div>
   `;
+}
 
+function wireTransitForm(woId){
   const now = new Date();
   document.getElementById("t-date").value = fmtDate(now.getTime());
   document.getElementById("t-time").value = fmtTime(now.getTime());
@@ -1139,16 +1173,14 @@ function renderTransit(){
       cond.innerHTML = "";
     }
   }
-  el.querySelectorAll('input[name=ttype]').forEach(r => r.addEventListener("change", () => {
-    el.querySelectorAll(".radio-chip").forEach(c=>c.classList.toggle("checked", c.querySelector("input").checked));
+  document.querySelectorAll('input[name=ttype]').forEach(r => r.addEventListener("change", () => {
+    document.querySelectorAll(".radio-chip").forEach(c=>c.classList.toggle("checked", c.querySelector("input").checked));
     refreshConditional();
   }));
   refreshConditional();
 
   function refreshAvail(){
-    const woId = document.getElementById("t-wo").value;
     const box = document.getElementById("t-station-avail");
-    if (!woId){ box.innerHTML = `<span class="muted small">請先選擇工單</span>`; return; }
     const prog = woProgress(woId);
     if (!prog.process){
       box.innerHTML = `<div class="diag-row fail"><div class="diag-icon">${icon("cross")}</div><div><div class="diag-title">此工單的產品尚未指定製程</div><div class="diag-msg">請先至「站別設定」建立製程，並在「產品 / 工單」為此產品指定所屬製程。</div></div></div>`;
@@ -1165,16 +1197,12 @@ function renderTransit(){
         <div class="small muted">目前狀態：<b>${escapeHtml(prog.currentLabel)}</b>　已完成 <b class="num">${prog.completed}</b> / ${woById(woId).plannedQty} 件</div>
       </div>`;
   }
-  const woSel = document.getElementById("t-wo");
-  if (woSel) woSel.addEventListener("change", refreshAvail);
   refreshAvail();
 
-  const btn = document.getElementById("btn-submit-transit");
-  if (btn) btn.addEventListener("click", () => submitTransit());
+  document.getElementById("btn-submit-transit").addEventListener("click", () => submitTransit(woId));
 }
 
-async function submitTransit(){
-  const woId = document.getElementById("t-wo").value;
+async function submitTransit(woId){
   const operator = document.getElementById("t-operator").value.trim();
   const station = document.getElementById("t-station").value;
   const qty = parseInt(document.getElementById("t-qty").value, 10);
@@ -1184,7 +1212,6 @@ async function submitTransit(){
   const resultBox = document.getElementById("t-result");
 
   const errors = [];
-  if (!woId) errors.push("請選擇工單");
   if (!operator) errors.push("請填寫操作人員");
   if (!station) errors.push("請選擇站別");
   if (!qty || qty <= 0) errors.push("數量須為正整數");
@@ -1242,18 +1269,17 @@ async function submitTransit(){
       date: date || fmtDate(Date.now()), time: time || fmtTime(Date.now()),
     });
   }catch(err){
-    // No state change happened — safe to write straight into the box we
-    // already have a live reference to, without re-rendering the view.
     resultBox.innerHTML = `<div class="diag-row fail"><div class="diag-icon">${icon("cross")}</div><div><div class="diag-title">送出前核對未通過</div><div class="diag-msg">${escapeHtml(err.message)}</div></div></div>`;
     return;
   }
 
-  // A record was written — refresh and re-render so the "各站可用數量" panel
-  // reflects the new totals, then re-query #t-result: render() just rebuilt
-  // the whole view, so the `resultBox` reference from above is now detached.
+  // Refresh the underlying page in the background (updates 工單清單 etc.),
+  // then show the ticket and auto-close the modal after a moment so the
+  // user gets to see confirmation before it disappears.
   await refreshState();
   render();
-  document.getElementById("t-result").innerHTML = ticketHtml(rec, wo);
+  resultBox.innerHTML = ticketHtml(rec, wo);
+  setTimeout(closeTransitModal, 1400);
 }
 
 function ticketHtml(rec, wo){
