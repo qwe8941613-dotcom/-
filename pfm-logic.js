@@ -1,7 +1,15 @@
 /* Pure production-flow business logic, shared by the app (pfm.html) and its
    test suite (pfm-logic.test.js). Every function takes an explicit `ctx`
-   ({ products, workOrders, stations, exceptionTypes, records }) instead of
-   reading global state, so it can run identically in the browser or Node. */
+   ({ products, workOrders, stations, processes, exceptionTypes, records })
+   instead of reading global state, so it can run identically in the browser
+   or Node.
+
+   Stations are reusable "building blocks" (just an id + name). A 製程
+   (process) is a named, ordered arrangement of those blocks — its
+   `stationIds` array IS the sequence. Each product is assigned to exactly
+   one process (`product.processId`); a work order's applicable sequence is
+   resolved via its product's process, so different products can run
+   different flows built from the same shared station pool. */
 
 const ABNORMAL_KEYWORDS = ["不良", "異常", "NG", "ng", "故障", "報廢", "退回", "不合格", "瑕疵"];
 
@@ -16,19 +24,38 @@ function productById(ctx, id) { return ctx.products.find(p => p.id === id); }
 function productByName(ctx, name) { return ctx.products.find(p => p.name === name); }
 function woById(ctx, id) { return ctx.workOrders.find(w => w.id === id); }
 function woByNo(ctx, no) { return ctx.workOrders.find(w => w.no === no); }
-function stationSeq(ctx) { return ctx.stations.map(s => s.name); }
+function stationById(ctx, id) { return ctx.stations.find(s => s.id === id); }
 function stationByName(ctx, name) { return ctx.stations.find(s => s.name === name); }
 function exTypeByName(ctx, name) { return ctx.exceptionTypes.find(e => e.type === name); }
+function processById(ctx, id) { return (ctx.processes || []).find(p => p.id === id); }
+function processByName(ctx, name) { return (ctx.processes || []).find(p => p.name === name); }
+
+// The ordered station-name sequence a given process defines. Unknown/missing
+// process (not yet assigned, or deleted out from under a product) yields an
+// empty sequence — callers treat that as "nothing to do yet", not a crash.
+function stationSeq(ctx, processId) {
+  const proc = processById(ctx, processId);
+  if (!proc) return [];
+  return proc.stationIds.map(id => (stationById(ctx, id) || {}).name).filter(Boolean);
+}
+
+// Resolves the process a work order actually runs through, via its product.
+function processForWO(ctx, wo) {
+  if (!wo) return null;
+  const product = productById(ctx, wo.productId);
+  return product ? processById(ctx, product.processId) : null;
+}
 
 function activeRecordsFor(ctx, woId) {
   return ctx.records.filter(r => r.workOrderId === woId && !r.superseded).sort((a, b) => a.createdAt - b.createdAt);
 }
 
-/* Replay a work order's records against the configured station sequence to
+/* Replay a work order's records against its product's process sequence to
    derive per-station queue levels, completed qty and current position. */
 function replay(ctx, woId) {
   const wo = woById(ctx, woId);
-  const seq = stationSeq(ctx);
+  const proc = processForWO(ctx, wo);
+  const seq = stationSeq(ctx, proc ? proc.id : null);
   const arrived = {}, departed = {};
   if (seq.length) arrived[seq[0]] = wo ? wo.plannedQty : 0;
   let completed = 0;
@@ -65,7 +92,7 @@ function replay(ctx, woId) {
   });
   const queues = seq.map(name => ({ name, qty: Math.max((arrived[name] || 0) - (departed[name] || 0), 0) }))
     .filter(q => q.qty > 0);
-  return { seq, arrived, departed, completed, queues, pendingExceptions, log };
+  return { seq, process: proc || null, arrived, departed, completed, queues, pendingExceptions, log };
 }
 
 function available(ctx, woId, station) {
@@ -85,7 +112,8 @@ function woProgress(ctx, woId) {
   const r = replay(ctx, woId);
   const pct = wo && wo.plannedQty ? Math.min(100, Math.round((r.completed / wo.plannedQty) * 100)) : 0;
   let currentLabel;
-  if (r.completed >= (wo ? wo.plannedQty : 0) && wo && wo.plannedQty > 0) currentLabel = "已完工";
+  if (!r.process) currentLabel = "尚未指定製程";
+  else if (r.completed >= (wo ? wo.plannedQty : 0) && wo && wo.plannedQty > 0) currentLabel = "已完工";
   else if (r.queues.length) currentLabel = r.queues.map(q => q.name).join(" / ");
   else currentLabel = r.seq[0] || "尚未設站";
   return { ...r, pct, currentLabel };
@@ -128,15 +156,21 @@ function runDiagnostics(ctx, fields) {
     else add("pass", "工單存在且與產品相符", "已核對工單資料。");
   }
 
+  let proc = null;
+  if (wo) {
+    proc = processForWO(ctx, wo);
+    if (!proc) add("fail", "此工單的產品尚未指定製程", "請先至「站別設定」建立製程流程，並在「產品 / 工單」為此產品指定所屬製程，才能核對站別順序與數量。");
+  }
+
   let station = null;
   let stationIsSkip = false;
   if (!fields.station) add("fail", "缺少「站別」欄位", "請填寫目前 / 發生站別。");
   else {
     station = stationByName(ctx, fields.station);
-    if (!station) add("fail", `站別「${fields.station}」尚未設定`, "請先至「站別設定」建立此站別，或確認名稱與已設定站別是否一致（含全形/半形差異）。");
-    else if (wo) {
+    if (!station) add("fail", `站別「${fields.station}」尚未設定`, "請先至「站別設定」建立此站別積木，或確認名稱與已設定站別是否一致（含全形/半形差異）。");
+    else if (wo && proc) {
       const prog = woProgress(ctx, wo.id);
-      const expected = prog.queues.length ? prog.queues.map(q => q.name) : [prog.seq[0]];
+      const expected = prog.queues.length ? prog.queues.map(q => q.name) : (prog.seq[0] ? [prog.seq[0]] : []);
       const isExpected = expected.includes(fields.station);
       const isExceptionReceive = prog.pendingExceptions.some(e => e.targetStation === fields.station);
       if (isExpected || isExceptionReceive) { add("pass", "站別符合製程順序", `工單目前應於「${expected.join("、")}」過站，輸入站別相符。`); }
@@ -144,6 +178,8 @@ function runDiagnostics(ctx, fields) {
         if (fields.reason) { stationIsSkip = true; add("warn", "偵測到跳站，已附原因", `目前應於「${expected.join("、")}」過站，但填寫至「${fields.station}」；已記錄跳站原因：「${fields.reason}」。`); }
         else add("fail", "跳過必要站別但未填寫原因", `工單目前應於「${expected.join("、")}」過站，直接填入「${fields.station}」視為跳站，請補上原因欄位，或修正為正確站別。`);
       }
+    } else if (wo && !proc) {
+      // Already reported above as "尚未指定製程" — avoid a second, redundant complaint.
     } else add("warn", "無法核對站別順序", "缺少有效工單，暫無法比對製程順序。");
   }
 
@@ -171,7 +207,7 @@ function runDiagnostics(ctx, fields) {
 
   const qtyNum = parseInt(fields.qty, 10);
   if (!fields.qty || isNaN(qtyNum) || qtyNum <= 0) add("fail", "數量錯誤", "數量必須是大於 0 的整數，請確認是否誤填文字、單位或負數。");
-  else if (wo && station) {
+  else if (wo && station && proc) {
     // A skip-to station has no "arrived" qty of its own to check against —
     // the batch is drawn from wherever it currently sits — so bound it by
     // the work order's total in-process qty instead of that station's queue.
@@ -179,7 +215,7 @@ function runDiagnostics(ctx, fields) {
     const availLabel = stationIsSkip ? "工單目前總在製數量" : `「${station.name}」目前可用數量`;
     if (qtyNum > avail) add("fail", "數量超過可過站數量", `${availLabel}為 ${avail} 件，輸入的 ${qtyNum} 件超過上限，請確認是否重複登記或數量填錯。`);
     else add("pass", "數量在可過站範圍內", `${availLabel} ${avail} 件，本次登記 ${qtyNum} 件。`);
-  } else add("warn", "數量格式正確，但無法核對上限", "缺少有效工單或站別，暫無法比對可過站數量。");
+  } else add("warn", "數量格式正確，但無法核對上限", "缺少有效工單、站別或製程，暫無法比對可過站數量。");
 
   if (!fields.date && !fields.time) add("warn", "未填寫日期／時間", "將自動帶入系統目前時間戳記。");
   else add("pass", "日期／時間已提供", "將以輸入內容記錄，仍會保留系統實際送出時間供追查。");
@@ -194,7 +230,8 @@ function runDiagnostics(ctx, fields) {
 
 const Logic = {
   ABNORMAL_KEYWORDS, FIELD_LABELS,
-  productById, productByName, woById, woByNo, stationSeq, stationByName, exTypeByName,
+  productById, productByName, woById, woByNo, stationById, stationByName, exTypeByName,
+  processById, processByName, stationSeq, processForWO,
   activeRecordsFor, replay, available, totalInProcess, woProgress, parseFreeText, runDiagnostics,
 };
 

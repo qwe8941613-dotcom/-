@@ -53,9 +53,19 @@ function buildSystemContext() {
   const activeWOs = state.workOrders
     .map(w => ({ wo: w, prog: PFMLogic.woProgress(state, w.id) }));
 
+  const processLines = (state.processes || []).map(proc =>
+    `「${proc.name}」：${PFMLogic.stationSeq(state, proc.id).join(" → ") || "（尚未加入站別）"}`
+  ).join("；") || "（無）";
+
+  const productLines = state.products.map(p => {
+    const proc = PFMLogic.processById(state, p.processId);
+    return `${p.name}（走「${proc ? proc.name : "尚未指定製程"}」）`;
+  }).join("、") || "（無）";
+
   return [
-    `已設定產品：${state.products.map(p => p.name).join("、") || "（無）"}`,
-    `已設定站別（依序）：${state.stations.map(s => s.name).join(" → ") || "（無）"}`,
+    `已設定產品：${productLines}`,
+    `已設定站別積木：${state.stations.map(s => s.name).join("、") || "（無）"}`,
+    `已設定製程（各自的站別順序）：${processLines}`,
     `已設定問題類型與後續站別：${state.exceptionTypes.map(e => `${e.type}→${e.targetStationName}`).join("、") || "（無）"}`,
     `所有工單狀態：${activeWOs.map(x => `${x.wo.no}／產品 ${(findProduct(x.wo.productId) || {}).name || "未知"}／${x.prog.currentLabel === "已完工" ? "已完工" : `目前應於「${x.prog.currentLabel}」過站`}／預計 ${x.wo.plannedQty} 件／已完成 ${x.prog.completed} 件`).join("；") || "（無）"}`,
     `等待接收的異常：${state.records.filter(r => r.type === "exception" && !r.superseded && !r.received).map(r => `${r.productName}於「${r.station}」發生「${r.problemType}」，${r.qty} 件，等待「${r.targetStation}」接收`).join("；") || "（無）"}`,
@@ -70,14 +80,18 @@ function defaultState() {
   const p1 = uid("p");
   const wo1 = uid("wo");
   const st1 = uid("st"), st2 = uid("st"), st3 = uid("st"), st4 = uid("st");
+  const proc1 = uid("proc");
   return {
-    products: [{ id: p1, name: "80CS", spec: "" }],
+    products: [{ id: p1, name: "80CS", spec: "", processId: proc1 }],
     workOrders: [{ id: wo1, no: "WO-20260808-01", productId: p1, plannedQty: 100, status: "in_progress", createdAt: Date.now(), createdBy: "系統預設" }],
     stations: [
       { id: st1, name: "接 Block" },
       { id: st2, name: "清洗站" },
       { id: st3, name: "檢驗站" },
       { id: st4, name: "包裝站" },
+    ],
+    processes: [
+      { id: proc1, name: "標準製程", stationIds: [st1, st2, st3, st4] },
     ],
     exceptionTypes: [
       { id: uid("ex"), type: "Block 不良", targetStationName: "清洗站" },
@@ -92,7 +106,10 @@ function loadState() {
     if (fs.existsSync(DATA_FILE)) {
       const raw = fs.readFileSync(DATA_FILE, "utf-8");
       const parsed = JSON.parse(raw);
-      if (parsed.products && parsed.stations) return parsed;
+      if (parsed.products && parsed.stations) {
+        if (!parsed.processes) parsed.processes = []; // 舊資料檔沒有製程概念，補一個空陣列
+        return parsed;
+      }
     }
   } catch (e) {
     console.error("讀取 data.json 失敗，改用預設資料：", e.message);
@@ -115,6 +132,7 @@ function findProduct(id) { return state.products.find(p => p.id === id); }
 function findWO(id) { return state.workOrders.find(w => w.id === id); }
 function findStation(name) { return state.stations.find(s => s.name === name); }
 function findExType(name) { return state.exceptionTypes.find(e => e.type === name); }
+function findProcess(id) { return state.processes.find(p => p.id === id); }
 
 app.get("/api/state", (req, res) => {
   res.json(state);
@@ -123,10 +141,22 @@ app.get("/api/state", (req, res) => {
 app.post("/api/products", (req, res) => {
   const name = (req.body.name || "").trim();
   const spec = (req.body.spec || "").trim();
+  const processId = req.body.processId || null;
   if (!name) return res.status(400).json({ error: "請輸入產品名稱" });
   if (state.products.some(p => p.name === name)) return res.status(400).json({ error: "此產品名稱已存在" });
-  const product = { id: uid("p"), name, spec };
+  if (processId && !findProcess(processId)) return res.status(400).json({ error: "指定的製程不存在" });
+  const product = { id: uid("p"), name, spec, processId };
   state.products.push(product);
+  saveState(state);
+  res.json(product);
+});
+
+app.post("/api/products/:id/process", (req, res) => {
+  const product = findProduct(req.params.id);
+  if (!product) return res.status(404).json({ error: "找不到此產品" });
+  const processId = req.body.processId || null;
+  if (processId && !findProcess(processId)) return res.status(400).json({ error: "指定的製程不存在" });
+  product.processId = processId;
   saveState(state);
   res.json(product);
 });
@@ -168,8 +198,61 @@ app.post("/api/stations/reorder", (req, res) => {
 
 app.delete("/api/stations/:id", (req, res) => {
   state.stations = state.stations.filter(s => s.id !== req.params.id);
+  // 站別積木被刪除了，順帶從所有製程的排序裡拿掉，避免製程裡卡著一個不存在的站。
+  state.processes.forEach(proc => { proc.stationIds = proc.stationIds.filter(id => id !== req.params.id); });
   saveState(state);
   res.json({ ok: true });
+});
+
+/* ---- 製程（把站別積木排成一條產品要跑的流程） ---- */
+app.post("/api/processes", (req, res) => {
+  const name = (req.body.name || "").trim();
+  if (!name) return res.status(400).json({ error: "請輸入製程名稱" });
+  if (state.processes.some(p => p.name === name)) return res.status(400).json({ error: "此製程名稱已存在" });
+  const proc = { id: uid("proc"), name, stationIds: [] };
+  state.processes.push(proc);
+  saveState(state);
+  res.json(proc);
+});
+
+app.delete("/api/processes/:id", (req, res) => {
+  if (state.products.some(p => p.processId === req.params.id)) {
+    return res.status(400).json({ error: "仍有產品使用此製程，請先改指定其他製程後再刪除" });
+  }
+  state.processes = state.processes.filter(p => p.id !== req.params.id);
+  saveState(state);
+  res.json({ ok: true });
+});
+
+app.post("/api/processes/:id/stations", (req, res) => {
+  const proc = findProcess(req.params.id);
+  if (!proc) return res.status(404).json({ error: "找不到此製程" });
+  const stationId = req.body.stationId;
+  if (!state.stations.some(s => s.id === stationId)) return res.status(400).json({ error: "站別不存在" });
+  if (proc.stationIds.includes(stationId)) return res.status(400).json({ error: "此站別已在製程中" });
+  proc.stationIds.push(stationId);
+  saveState(state);
+  res.json(proc);
+});
+
+app.post("/api/processes/:id/stations/reorder", (req, res) => {
+  const proc = findProcess(req.params.id);
+  if (!proc) return res.status(404).json({ error: "找不到此製程" });
+  const ids = req.body.stationIds || [];
+  if (!Array.isArray(ids) || ids.length !== proc.stationIds.length) return res.status(400).json({ error: "站別清單不完整" });
+  const same = ids.every(id => proc.stationIds.includes(id));
+  if (!same) return res.status(400).json({ error: "站別清單不一致" });
+  proc.stationIds = ids;
+  saveState(state);
+  res.json(proc);
+});
+
+app.delete("/api/processes/:id/stations/:stationId", (req, res) => {
+  const proc = findProcess(req.params.id);
+  if (!proc) return res.status(404).json({ error: "找不到此製程" });
+  proc.stationIds = proc.stationIds.filter(id => id !== req.params.stationId);
+  saveState(state);
+  res.json(proc);
 });
 
 app.post("/api/exceptiontypes", (req, res) => {
@@ -269,6 +352,7 @@ app.post("/api/records", (req, res) => {
   if (!["normal", "skip", "exception"].includes(type)) return res.status(400).json({ error: "過站類型不正確" });
 
   const prog = PFMLogic.woProgress(state, wo.id);
+  if (!prog.process) return res.status(400).json({ error: "此工單的產品尚未指定製程，請先至「站別設定」建立製程並在「產品/工單」指定" });
   if (prog.currentLabel === "已完工") return res.status(400).json({ error: "此工單已完工，不可再登記過站" });
 
   if (type === "skip") {

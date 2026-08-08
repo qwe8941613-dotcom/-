@@ -323,19 +323,38 @@ const PFMLogic = (function(){
   function productByName(ctx, name) { return ctx.products.find(p => p.name === name); }
   function woById(ctx, id) { return ctx.workOrders.find(w => w.id === id); }
   function woByNo(ctx, no) { return ctx.workOrders.find(w => w.no === no); }
-  function stationSeq(ctx) { return ctx.stations.map(s => s.name); }
+  function stationById(ctx, id) { return ctx.stations.find(s => s.id === id); }
   function stationByName(ctx, name) { return ctx.stations.find(s => s.name === name); }
   function exTypeByName(ctx, name) { return ctx.exceptionTypes.find(e => e.type === name); }
+  function processById(ctx, id) { return (ctx.processes || []).find(p => p.id === id); }
+  function processByName(ctx, name) { return (ctx.processes || []).find(p => p.name === name); }
+
+  // The ordered station-name sequence a given process defines. Unknown/missing
+  // process (not yet assigned, or deleted out from under a product) yields an
+  // empty sequence — callers treat that as "nothing to do yet", not a crash.
+  function stationSeq(ctx, processId) {
+    const proc = processById(ctx, processId);
+    if (!proc) return [];
+    return proc.stationIds.map(id => (stationById(ctx, id) || {}).name).filter(Boolean);
+  }
+
+  // Resolves the process a work order actually runs through, via its product.
+  function processForWO(ctx, wo) {
+    if (!wo) return null;
+    const product = productById(ctx, wo.productId);
+    return product ? processById(ctx, product.processId) : null;
+  }
 
   function activeRecordsFor(ctx, woId) {
     return ctx.records.filter(r => r.workOrderId === woId && !r.superseded).sort((a, b) => a.createdAt - b.createdAt);
   }
 
-  /* Replay a work order's records against the configured station sequence to
+  /* Replay a work order's records against its product's process sequence to
      derive per-station queue levels, completed qty and current position. */
   function replay(ctx, woId) {
     const wo = woById(ctx, woId);
-    const seq = stationSeq(ctx);
+    const proc = processForWO(ctx, wo);
+    const seq = stationSeq(ctx, proc ? proc.id : null);
     const arrived = {}, departed = {};
     if (seq.length) arrived[seq[0]] = wo ? wo.plannedQty : 0;
     let completed = 0;
@@ -372,7 +391,7 @@ const PFMLogic = (function(){
     });
     const queues = seq.map(name => ({ name, qty: Math.max((arrived[name] || 0) - (departed[name] || 0), 0) }))
       .filter(q => q.qty > 0);
-    return { seq, arrived, departed, completed, queues, pendingExceptions, log };
+    return { seq, process: proc || null, arrived, departed, completed, queues, pendingExceptions, log };
   }
 
   function available(ctx, woId, station) {
@@ -392,7 +411,8 @@ const PFMLogic = (function(){
     const r = replay(ctx, woId);
     const pct = wo && wo.plannedQty ? Math.min(100, Math.round((r.completed / wo.plannedQty) * 100)) : 0;
     let currentLabel;
-    if (r.completed >= (wo ? wo.plannedQty : 0) && wo && wo.plannedQty > 0) currentLabel = "已完工";
+    if (!r.process) currentLabel = "尚未指定製程";
+    else if (r.completed >= (wo ? wo.plannedQty : 0) && wo && wo.plannedQty > 0) currentLabel = "已完工";
     else if (r.queues.length) currentLabel = r.queues.map(q => q.name).join(" / ");
     else currentLabel = r.seq[0] || "尚未設站";
     return { ...r, pct, currentLabel };
@@ -435,15 +455,21 @@ const PFMLogic = (function(){
       else add("pass", "工單存在且與產品相符", "已核對工單資料。");
     }
 
+    let proc = null;
+    if (wo) {
+      proc = processForWO(ctx, wo);
+      if (!proc) add("fail", "此工單的產品尚未指定製程", "請先至「站別設定」建立製程流程，並在「產品 / 工單」為此產品指定所屬製程，才能核對站別順序與數量。");
+    }
+
     let station = null;
     let stationIsSkip = false;
     if (!fields.station) add("fail", "缺少「站別」欄位", "請填寫目前 / 發生站別。");
     else {
       station = stationByName(ctx, fields.station);
-      if (!station) add("fail", `站別「${fields.station}」尚未設定`, "請先至「站別設定」建立此站別，或確認名稱與已設定站別是否一致（含全形/半形差異）。");
-      else if (wo) {
+      if (!station) add("fail", `站別「${fields.station}」尚未設定`, "請先至「站別設定」建立此站別積木，或確認名稱與已設定站別是否一致（含全形/半形差異）。");
+      else if (wo && proc) {
         const prog = woProgress(ctx, wo.id);
-        const expected = prog.queues.length ? prog.queues.map(q => q.name) : [prog.seq[0]];
+        const expected = prog.queues.length ? prog.queues.map(q => q.name) : (prog.seq[0] ? [prog.seq[0]] : []);
         const isExpected = expected.includes(fields.station);
         const isExceptionReceive = prog.pendingExceptions.some(e => e.targetStation === fields.station);
         if (isExpected || isExceptionReceive) { add("pass", "站別符合製程順序", `工單目前應於「${expected.join("、")}」過站，輸入站別相符。`); }
@@ -451,6 +477,8 @@ const PFMLogic = (function(){
           if (fields.reason) { stationIsSkip = true; add("warn", "偵測到跳站，已附原因", `目前應於「${expected.join("、")}」過站，但填寫至「${fields.station}」；已記錄跳站原因：「${fields.reason}」。`); }
           else add("fail", "跳過必要站別但未填寫原因", `工單目前應於「${expected.join("、")}」過站，直接填入「${fields.station}」視為跳站，請補上原因欄位，或修正為正確站別。`);
         }
+      } else if (wo && !proc) {
+        // Already reported above as "尚未指定製程" — avoid a second, redundant complaint.
       } else add("warn", "無法核對站別順序", "缺少有效工單，暫無法比對製程順序。");
     }
 
@@ -478,7 +506,7 @@ const PFMLogic = (function(){
 
     const qtyNum = parseInt(fields.qty, 10);
     if (!fields.qty || isNaN(qtyNum) || qtyNum <= 0) add("fail", "數量錯誤", "數量必須是大於 0 的整數，請確認是否誤填文字、單位或負數。");
-    else if (wo && station) {
+    else if (wo && station && proc) {
       // A skip-to station has no "arrived" qty of its own to check against —
       // the batch is drawn from wherever it currently sits — so bound it by
       // the work order's total in-process qty instead of that station's queue.
@@ -486,7 +514,7 @@ const PFMLogic = (function(){
       const availLabel = stationIsSkip ? "工單目前總在製數量" : `「${station.name}」目前可用數量`;
       if (qtyNum > avail) add("fail", "數量超過可過站數量", `${availLabel}為 ${avail} 件，輸入的 ${qtyNum} 件超過上限，請確認是否重複登記或數量填錯。`);
       else add("pass", "數量在可過站範圍內", `${availLabel} ${avail} 件，本次登記 ${qtyNum} 件。`);
-    } else add("warn", "數量格式正確，但無法核對上限", "缺少有效工單或站別，暫無法比對可過站數量。");
+    } else add("warn", "數量格式正確，但無法核對上限", "缺少有效工單、站別或製程，暫無法比對可過站數量。");
 
     if (!fields.date && !fields.time) add("warn", "未填寫日期／時間", "將自動帶入系統目前時間戳記。");
     else add("pass", "日期／時間已提供", "將以輸入內容記錄，仍會保留系統實際送出時間供追查。");
@@ -501,7 +529,8 @@ const PFMLogic = (function(){
 
   return {
     ABNORMAL_KEYWORDS, FIELD_LABELS,
-    productById, productByName, woById, woByNo, stationSeq, stationByName, exTypeByName,
+    productById, productByName, woById, woByNo, stationById, stationByName, exTypeByName,
+    processById, processByName, stationSeq, processForWO,
     activeRecordsFor, replay, available, totalInProcess, woProgress, parseFreeText, runDiagnostics,
   };
 })();
@@ -512,7 +541,7 @@ const PFMLogic = (function(){
    `state` is a local cache of the server's data: refreshed after every write
    and polled periodically so other people's changes show up here too. */
 const uid = (p) => p + "_" + Math.random().toString(36).slice(2,9);
-let state = { products: [], workOrders: [], stations: [], exceptionTypes: [], records: [] };
+let state = { products: [], workOrders: [], stations: [], processes: [], exceptionTypes: [], records: [] };
 
 async function api(path, method, body){
   const resp = await fetch(path, {
@@ -560,9 +589,13 @@ function productById(id){ return PFMLogic.productById(state, id); }
 function productByName(name){ return PFMLogic.productByName(state, name); }
 function woById(id){ return PFMLogic.woById(state, id); }
 function woByNo(no){ return PFMLogic.woByNo(state, no); }
-function stationSeq(){ return PFMLogic.stationSeq(state); }
+function stationById(id){ return PFMLogic.stationById(state, id); }
 function stationByName(name){ return PFMLogic.stationByName(state, name); }
 function exTypeByName(name){ return PFMLogic.exTypeByName(state, name); }
+function processById(id){ return PFMLogic.processById(state, id); }
+function processByName(name){ return PFMLogic.processByName(state, name); }
+function stationSeq(processId){ return PFMLogic.stationSeq(state, processId); }
+function processForWO(wo){ return PFMLogic.processForWO(state, wo); }
 function activeRecordsFor(woId){ return PFMLogic.activeRecordsFor(state, woId); }
 function replay(woId){ return PFMLogic.replay(state, woId); }
 function available(woId, station){ return PFMLogic.available(state, woId, station); }
@@ -672,6 +705,7 @@ function travelerCard(wo){
            (idx < seq.length-1 ? `<div class="pipe-line ${doneAll?"done":""}"></div>` : "");
   }).join("");
   const statusChip = doneAll ? `<span class="chip success"><span class="dot"></span>已完工</span>` :
+    !prog.process ? `<span class="chip warning"><span class="dot"></span>尚未指定製程</span>` :
     prog.pendingExceptions.length ? `<span class="chip danger"><span class="dot"></span>等待${escapeHtml(prog.pendingExceptions[prog.pendingExceptions.length-1].targetStation)}接收</span>` :
     `<span class="chip info"><span class="dot"></span>生產中：${escapeHtml(prog.currentLabel)}</span>`;
   return `
@@ -683,7 +717,7 @@ function travelerCard(wo){
         </div>
         ${statusChip}
       </div>
-      <div class="pipeline">${nodesHtml || '<span class="muted small">尚未設定站別</span>'}</div>
+      <div class="pipeline">${nodesHtml || `<span class="muted small">${prog.process ? "此製程尚未加入任何站別" : "此產品尚未指定製程，請至「站別設定」設定"}</span>`}</div>
       <div class="progress-bar"><i style="width:${prog.pct}%"></i></div>
     </div>
   `;
@@ -695,11 +729,18 @@ function renderMaster(){
   el.innerHTML = `
     <div class="grid cols-2">
       <div class="card">
-        <div class="card-head"><h2>建立產品資料</h2></div>
+        <div class="card-head"><h2>建立產品資料</h2><span class="hint">可選擇要跑哪個製程，之後也能再改</span></div>
         <div class="card-pad stack">
           <div class="form-row">
             <div class="field"><label>產品名稱 <span class="req">*</span></label><input type="text" id="f-prod-name" placeholder="例：80CS"></div>
             <div class="field"><label>規格 / 備註</label><input type="text" id="f-prod-spec" placeholder="選填"></div>
+          </div>
+          <div class="field">
+            <label>所屬製程</label>
+            <select id="f-prod-process">
+              <option value="">尚未指定（可稍後再設定）</option>
+              ${state.processes.map(p=>`<option value="${p.id}">${escapeHtml(p.name)}（${stationSeq(p.id).join(" → ") || "尚無站別"}）</option>`).join("")}
+            </select>
           </div>
           <div><button class="btn accent" id="btn-add-product">${icon("plus")}新增產品</button></div>
         </div>
@@ -721,8 +762,16 @@ function renderMaster(){
 
     <div class="card">
       <div class="card-head"><h2>產品清單</h2><span class="hint">${state.products.length} 項</span></div>
-      <div class="table-wrap"><table><thead><tr><th>產品名稱</th><th>規格 / 備註</th><th>相關工單數</th></tr></thead>
-      <tbody>${state.products.length ? state.products.map(p=>`<tr><td><b>${escapeHtml(p.name)}</b></td><td class="muted">${escapeHtml(p.spec||"—")}</td><td class="num">${state.workOrders.filter(w=>w.productId===p.id).length}</td></tr>`).join("") : `<tr><td colspan="3" class="empty-row">尚未建立產品</td></tr>`}</tbody></table></div>
+      <div class="table-wrap"><table><thead><tr><th>產品名稱</th><th>規格 / 備註</th><th>所屬製程</th><th>相關工單數</th></tr></thead>
+      <tbody>${state.products.length ? state.products.map(p=>`<tr>
+        <td><b>${escapeHtml(p.name)}</b></td>
+        <td class="muted">${escapeHtml(p.spec||"—")}</td>
+        <td><select data-set-process="${p.id}" style="min-width:160px">
+          <option value="">尚未指定</option>
+          ${state.processes.map(proc=>`<option value="${proc.id}" ${proc.id===p.processId?"selected":""}>${escapeHtml(proc.name)}</option>`).join("")}
+        </select></td>
+        <td class="num">${state.workOrders.filter(w=>w.productId===p.id).length}</td>
+      </tr>`).join("") : `<tr><td colspan="4" class="empty-row">尚未建立產品</td></tr>`}</tbody></table></div>
     </div>
 
     <div class="card">
@@ -739,9 +788,14 @@ function renderMaster(){
   document.getElementById("btn-add-product").addEventListener("click", () => {
     const name = document.getElementById("f-prod-name").value.trim();
     const spec = document.getElementById("f-prod-spec").value.trim();
+    const processId = document.getElementById("f-prod-process").value || null;
     if (!name){ alert("請輸入產品名稱"); return; }
-    withServerSync(() => api("/api/products", "POST", { name, spec }));
+    withServerSync(() => api("/api/products", "POST", { name, spec, processId }));
   });
+
+  el.querySelectorAll("[data-set-process]").forEach(sel => sel.addEventListener("change", () => {
+    withServerSync(() => api(`/api/products/${sel.dataset.setProcess}/process`, "POST", { processId: sel.value || null }));
+  }));
 
   const btnAddWo = document.getElementById("btn-add-wo");
   if (btnAddWo) btnAddWo.addEventListener("click", () => {
@@ -754,17 +808,17 @@ function renderMaster(){
   });
 }
 
-/* ============================= STATIONS ============================= */
+/* ============================= STATIONS (站別積木 + 製程) ============================= */
 function renderStations(){
   const el = document.getElementById("view-stations");
   el.innerHTML = `
     <div class="grid cols-2">
       <div class="card">
-        <div class="card-head"><h2>製程站別順序</h2><span class="hint">依序為正常過站流程</span></div>
+        <div class="card-head"><h2>站別積木庫</h2><span class="hint">可重複使用的站別，像積木一樣拿去排進不同製程</span></div>
         <div class="card-pad stack">
           <div class="inline-list" id="station-list"></div>
           <div class="form-row">
-            <div class="field" style="flex:2"><label>新增站別</label><input type="text" id="f-station-name" placeholder="例：包裝站"></div>
+            <div class="field" style="flex:2"><label>新增站別積木</label><input type="text" id="f-station-name" placeholder="例：鍍膜站"></div>
             <div class="field" style="flex:0 0 auto; align-self:flex-end"><button class="btn accent" id="btn-add-station">${icon("plus")}新增</button></div>
           </div>
         </div>
@@ -782,44 +836,72 @@ function renderStations(){
         </div>
       </div>
     </div>
+
+    <div class="card">
+      <div class="card-head"><h2>製程管理</h2><span class="hint">把積木排成一條產品要跑的流程，不同產品可以用不同製程</span></div>
+      <div class="card-pad stack">
+        <div class="form-row">
+          <div class="field" style="flex:2"><label>新增製程</label><input type="text" id="f-process-name" placeholder="例：鍍膜製程"></div>
+          <div class="field" style="flex:0 0 auto; align-self:flex-end"><button class="btn accent" id="btn-add-process">${icon("plus")}建立製程</button></div>
+        </div>
+        <div id="process-list" class="stack"></div>
+      </div>
+    </div>
   `;
 
-  document.getElementById("station-list").innerHTML = state.stations.map((s, idx) => `
+  document.getElementById("station-list").innerHTML = state.stations.length ? state.stations.map(s => `
     <div class="tag-editable">
-      <span class="eyebrow num">${String(idx+1).padStart(2,"0")}</span><b>${escapeHtml(s.name)}</b>
-      <div class="order-btns">
-        <button data-up="${s.id}" ${idx===0?"disabled":""}>${icon("up")}</button>
-        <button data-down="${s.id}" ${idx===state.stations.length-1?"disabled":""}>${icon("down")}</button>
-      </div>
+      <b>${escapeHtml(s.name)}</b>
       <button class="btn ghost sm" data-del-station="${s.id}">${icon("trash")}</button>
-    </div>`).join("") || `<span class="muted small">尚未設定站別</span>`;
+    </div>`).join("") : `<span class="muted small">尚未建立任何站別積木</span>`;
 
   document.getElementById("ex-type-list").innerHTML = state.exceptionTypes.length ? state.exceptionTypes.map(e => `
     <tr><td><b>${escapeHtml(e.type)}</b></td><td><span class="chip info">${escapeHtml(e.targetStationName)}</span></td>
     <td><button class="btn ghost sm" data-del-ex="${e.id}">${icon("trash")}</button></td></tr>`).join("")
     : `<tr><td colspan="3" class="empty-row">尚未設定異常分支</td></tr>`;
 
+  const procList = document.getElementById("process-list");
+  procList.innerHTML = state.processes.length ? state.processes.map(proc => {
+    const usedByProducts = state.products.filter(p => p.processId === proc.id).map(p => p.name);
+    const blocksInProc = proc.stationIds.map(id => stationById(id)).filter(Boolean);
+    const availableBlocks = state.stations.filter(s => !proc.stationIds.includes(s.id));
+    const pipeline = blocksInProc.length ? blocksInProc.map((s, idx) => `
+        <div class="tag-editable">
+          <span class="eyebrow num">${String(idx+1).padStart(2,"0")}</span><b>${escapeHtml(s.name)}</b>
+          <div class="order-btns">
+            <button data-proc-up="${proc.id}" data-station="${s.id}" ${idx===0?"disabled":""}>${icon("up")}</button>
+            <button data-proc-down="${proc.id}" data-station="${s.id}" ${idx===blocksInProc.length-1?"disabled":""}>${icon("down")}</button>
+          </div>
+          <button class="btn ghost sm" data-proc-remove="${proc.id}" data-station="${s.id}">${icon("trash")}</button>
+        </div>` + (idx < blocksInProc.length-1 ? `<span class="muted" style="align-self:center">→</span>` : "")
+      ).join("") : `<span class="muted small">尚未加入任何站別，從下方選擇積木加入</span>`;
+    return `
+      <div class="card" style="box-shadow:none">
+        <div class="card-pad stack">
+          <div class="traveler-top">
+            <div><b>${escapeHtml(proc.name)}</b> <span class="small muted">${usedByProducts.length ? "使用中：" + usedByProducts.map(escapeHtml).join("、") : "尚無產品使用"}</span></div>
+            <button class="btn ghost sm" data-del-process="${proc.id}">${icon("trash")}刪除製程</button>
+          </div>
+          <div class="inline-list" style="align-items:center">${pipeline}</div>
+          <div class="form-row">
+            <div class="field" style="flex:2"><label>加入站別積木</label>
+              <select data-proc-add="${proc.id}" ${availableBlocks.length?"":"disabled"}>
+                ${availableBlocks.length ? availableBlocks.map(s=>`<option value="${s.id}">${escapeHtml(s.name)}</option>`).join("") : `<option>（積木已全數加入，或尚未建立積木）</option>`}
+              </select>
+            </div>
+            <div class="field" style="flex:0 0 auto; align-self:flex-end"><button class="btn ghost sm" data-proc-add-btn="${proc.id}" ${availableBlocks.length?"":"disabled"}>${icon("plus")}加入</button></div>
+          </div>
+        </div>
+      </div>`;
+  }).join("") : `<span class="muted small">尚未建立任何製程</span>`;
+
   document.getElementById("btn-add-station").addEventListener("click", () => {
     const name = document.getElementById("f-station-name").value.trim();
     if (!name){ alert("請輸入站別名稱"); return; }
     withServerSync(() => api("/api/stations", "POST", { name }));
   });
-  el.querySelectorAll("[data-up]").forEach(b=>b.addEventListener("click",()=>{
-    const i = state.stations.findIndex(s=>s.id===b.dataset.up);
-    if (i<=0) return;
-    const ids = state.stations.map(s=>s.id);
-    [ids[i-1], ids[i]] = [ids[i], ids[i-1]];
-    withServerSync(() => api("/api/stations/reorder", "POST", { ids }));
-  }));
-  el.querySelectorAll("[data-down]").forEach(b=>b.addEventListener("click",()=>{
-    const i = state.stations.findIndex(s=>s.id===b.dataset.down);
-    if (i>=state.stations.length-1) return;
-    const ids = state.stations.map(s=>s.id);
-    [ids[i+1], ids[i]] = [ids[i], ids[i+1]];
-    withServerSync(() => api("/api/stations/reorder", "POST", { ids }));
-  }));
   el.querySelectorAll("[data-del-station]").forEach(b=>b.addEventListener("click",()=>{
-    if (!confirm("刪除此站別？已產生的過站紀錄仍會保留原始站別名稱。")) return;
+    if (!confirm("刪除此站別積木？會一併從所有製程中移除，已產生的過站紀錄仍會保留原始站別名稱。")) return;
     withServerSync(() => api("/api/stations/" + b.dataset.delStation, "DELETE"));
   }));
   document.getElementById("btn-add-extype").addEventListener("click", () => {
@@ -831,6 +913,41 @@ function renderStations(){
   });
   el.querySelectorAll("[data-del-ex]").forEach(b=>b.addEventListener("click",()=>{
     withServerSync(() => api("/api/exceptiontypes/" + b.dataset.delEx, "DELETE"));
+  }));
+
+  document.getElementById("btn-add-process").addEventListener("click", () => {
+    const name = document.getElementById("f-process-name").value.trim();
+    if (!name){ alert("請輸入製程名稱"); return; }
+    withServerSync(() => api("/api/processes", "POST", { name }));
+  });
+  el.querySelectorAll("[data-del-process]").forEach(b=>b.addEventListener("click",()=>{
+    if (!confirm("刪除此製程？若仍有產品使用，將無法刪除。")) return;
+    withServerSync(() => api("/api/processes/" + b.dataset.delProcess, "DELETE"));
+  }));
+  el.querySelectorAll("[data-proc-add-btn]").forEach(b=>b.addEventListener("click",()=>{
+    const procId = b.dataset.procAddBtn;
+    const sel = el.querySelector(`[data-proc-add="${procId}"]`);
+    if (!sel || !sel.value) return;
+    withServerSync(() => api(`/api/processes/${procId}/stations`, "POST", { stationId: sel.value }));
+  }));
+  el.querySelectorAll("[data-proc-remove]").forEach(b=>b.addEventListener("click",()=>{
+    withServerSync(() => api(`/api/processes/${b.dataset.procRemove}/stations/${b.dataset.station}`, "DELETE"));
+  }));
+  el.querySelectorAll("[data-proc-up]").forEach(b=>b.addEventListener("click",()=>{
+    const proc = processById(b.dataset.procUp);
+    const i = proc.stationIds.indexOf(b.dataset.station);
+    if (i<=0) return;
+    const stationIds = proc.stationIds.slice();
+    [stationIds[i-1], stationIds[i]] = [stationIds[i], stationIds[i-1]];
+    withServerSync(() => api(`/api/processes/${proc.id}/stations/reorder`, "POST", { stationIds }));
+  }));
+  el.querySelectorAll("[data-proc-down]").forEach(b=>b.addEventListener("click",()=>{
+    const proc = processById(b.dataset.procDown);
+    const i = proc.stationIds.indexOf(b.dataset.station);
+    if (i<0 || i>=proc.stationIds.length-1) return;
+    const stationIds = proc.stationIds.slice();
+    [stationIds[i+1], stationIds[i]] = [stationIds[i], stationIds[i+1]];
+    withServerSync(() => api(`/api/processes/${proc.id}/stations/reorder`, "POST", { stationIds }));
   }));
 }
 
@@ -915,11 +1032,16 @@ function renderTransit(){
     const box = document.getElementById("t-station-avail");
     if (!woId){ box.innerHTML = `<span class="muted small">請先選擇工單</span>`; return; }
     const prog = woProgress(woId);
+    if (!prog.process){
+      box.innerHTML = `<div class="diag-row fail"><div class="diag-icon">${icon("cross")}</div><div><div class="diag-title">此工單的產品尚未指定製程</div><div class="diag-msg">請先至「站別設定」建立製程，並在「產品 / 工單」為此產品指定所屬製程。</div></div></div>`;
+      return;
+    }
     box.innerHTML = `
+      <div class="small muted" style="margin-bottom:8px">製程：<b>${escapeHtml(prog.process.name)}</b></div>
       <div class="stack">
-        ${state.stations.map(s => {
-          const qty = (prog.arrived[s.name]||0) - (prog.departed[s.name]||0);
-          return `<div class="stat-bar-row"><div class="name">${escapeHtml(s.name)}</div><div class="stat-bar-track"><div class="stat-bar-fill" style="width:${prog.seq[0]?Math.min(100, (Math.max(qty,0)/ (woById(woId).plannedQty||1))*100):0}%"></div></div><div class="stat-bar-num num">${Math.max(qty,0)}</div></div>`;
+        ${prog.seq.map(name => {
+          const qty = (prog.arrived[name]||0) - (prog.departed[name]||0);
+          return `<div class="stat-bar-row"><div class="name">${escapeHtml(name)}</div><div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.min(100, (Math.max(qty,0)/ (woById(woId).plannedQty||1))*100)}%"></div></div><div class="stat-bar-num num">${Math.max(qty,0)}</div></div>`;
         }).join("")}
         <hr class="divider">
         <div class="small muted">目前狀態：<b>${escapeHtml(prog.currentLabel)}</b>　已完成 <b class="num">${prog.completed}</b> / ${woById(woId).plannedQty} 件</div>
@@ -950,9 +1072,11 @@ async function submitTransit(){
   if (!qty || qty <= 0) errors.push("數量須為正整數");
 
   const wo = woById(woId);
-  const seq = stationSeq();
   const prog = wo ? woProgress(woId) : null;
+  const seq = prog ? prog.seq : [];
   let reason = "", problemType = "", targetStation = "";
+
+  if (wo && !prog.process) errors.push("此工單的產品尚未指定製程，請先至「站別設定」建立製程並在「產品/工單」指定");
 
   if (type === "skip"){
     reason = (document.getElementById("t-reason")?.value || "").trim();
