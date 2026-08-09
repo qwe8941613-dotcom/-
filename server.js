@@ -307,7 +307,7 @@ app.post("/api/assistant/chat", async (req, res) => {
 規則：
 - 只能根據下面提供的「系統目前資料」回答，不可以編造資料中沒有的內容
 - 如果使用者問的產品、站別、工單不在系統資料中，直接告知「系統目前沒有登記這項資料」，不要用一般常識回答
-- 如果使用者想要「登記過站」「新增工單」「修改資料」這類會改變系統狀態的操作，告訴他這裡只能查詢，登記過站請到「產品 / 工單」頁面點選該筆工單，修改紀錄請至「修正紀錄」頁面，不要嘗試自己執行
+- 如果使用者想要「登記過站」「新增工單」「修改資料」這類會改變系統狀態的操作，告訴他這裡只能查詢，登記過站請到「工單」頁面點選該筆工單，修改紀錄請至「修正紀錄」頁面，不要嘗試自己執行
 - 用繁體中文回答，盡量簡短
 - 不要使用 markdown 語法（例如 ** 粗體、# 標題），畫面只會顯示純文字，星號會直接被看到
 
@@ -361,7 +361,7 @@ app.post("/api/records", (req, res) => {
   if (!["normal", "skip", "exception"].includes(type)) return res.status(400).json({ error: "過站類型不正確" });
 
   const prog = PFMLogic.woProgress(state, wo.id);
-  if (!prog.process) return res.status(400).json({ error: "此工單的產品尚未指定製程，請先至「站別設定」建立製程並在「產品/工單」指定" });
+  if (!prog.process) return res.status(400).json({ error: "此工單的產品尚未指定製程，請先至「站別設定」建立製程並在「產品」頁面指定" });
   if (prog.currentLabel === "已完工") return res.status(400).json({ error: "此工單已完工，不可再登記過站" });
 
   if (type === "skip") {

@@ -246,7 +246,6 @@
   .small{ font-size:12px; }
   .small.over{ color:var(--danger); font-weight:700; }
   .stack{ display:flex; flex-direction:column; gap:10px; }
-  .section-label{ font-size:12px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-faint); padding-bottom:4px; border-bottom:1px solid var(--border); }
   .inline-list{ display:flex; flex-wrap:wrap; gap:8px; }
   .tag-editable{ display:flex; align-items:center; gap:8px; background:var(--surface-2); border:1px solid var(--border); border-radius:6px; padding:6px 8px 6px 12px; font-size:12.5px; }
   .tag-editable b{ font-family:var(--font-mono); }
@@ -317,7 +316,8 @@
     </header>
 
     <section class="view" id="view-dashboard"></section>
-    <section class="view" id="view-master" hidden></section>
+    <section class="view" id="view-products" hidden></section>
+    <section class="view" id="view-workorders" hidden></section>
     <section class="view" id="view-stations" hidden></section>
     <section class="view" id="view-ai" hidden></section>
     <section class="view" id="view-exceptions" hidden></section>
@@ -688,7 +688,8 @@ function woProgress(woId){ return PFMLogic.woProgress(state, woId); }
 /* ============================= NAV ============================= */
 const NAV = [
   { id:"dashboard", label:"總覽", icon:"dashboard", title:"總覽", sub:"工單、站別與過站狀態一覽" },
-  { id:"master", label:"產品 / 工單", icon:"box", title:"產品與工單", sub:"建立產品資料與生產工單" },
+  { id:"products", label:"產品", icon:"box", title:"產品", sub:"建立與管理產品資料" },
+  { id:"workorders", label:"工單", icon:"transit", title:"生產工單", sub:"建立生產工單並登記過站" },
   { id:"stations", label:"站別設定", icon:"route", title:"站別設定", sub:"設定製程順序與分流設定" },
   { id:"ai", label:"AI 助理", icon:"spark", title:"AI 助理", sub:"詢問目前生產狀況，AI 會依系統即時資料回答（唯讀，不會建立或修改紀錄）" },
   { id:"exceptions", label:"分流追蹤", icon:"alert", title:"分流追蹤", sub:"分流原因與後續站別接收狀態" },
@@ -702,7 +703,7 @@ function renderNav(){
   nav.innerHTML = NAV.map(n => {
     let count = "";
     if (n.id==="exceptions"){ const c = state.records.filter(r=>r.type==="exception" && !r.superseded && !r.received).length; if (c) count = c; }
-    if (n.id==="master"){ count = state.workOrders.length; }
+    if (n.id==="workorders"){ count = state.workOrders.length; }
     return `<button class="nav-item ${currentView===n.id?"active":""}" data-nav="${n.id}">${icon(n.icon)}<span>${n.label}</span>${count!==""?`<span class="count">${count}</span>`:""}</button>`;
   }).join("");
   nav.querySelectorAll("[data-nav]").forEach(b => b.addEventListener("click", () => { currentView = b.dataset.nav; render(); }));
@@ -716,7 +717,7 @@ function render(){
   document.getElementById("view-sub").textContent = meta.sub;
   NAV.forEach(n => { document.getElementById("view-"+n.id).hidden = (n.id !== currentView); });
   ({
-    dashboard: renderDashboard, master: renderMaster, stations: renderStations,
+    dashboard: renderDashboard, products: renderProducts, workorders: renderWorkOrders, stations: renderStations,
     ai: renderAI, exceptions: renderExceptions,
     stats: renderStats, history: renderHistory,
   })[currentView]();
@@ -756,7 +757,7 @@ function renderDashboard(){
 
   const travWrap = document.getElementById("dash-travelers");
   if (!state.workOrders.length){
-    travWrap.innerHTML = `<div class="empty-row muted">尚未建立任何工單，請先至「產品 / 工單」建立。</div>`;
+    travWrap.innerHTML = `<div class="empty-row muted">尚未建立任何工單，請先至「工單」頁面建立。</div>`;
   } else {
     travWrap.innerHTML = state.workOrders.map(wo => travelerCard(wo)).join("");
   }
@@ -805,90 +806,50 @@ function travelerCard(wo){
   `;
 }
 
-/* ============================= MASTER (products & work orders) ============================= */
+/* ============================= PRODUCTS ============================= */
 let showProductForm = false;
-let showWoForm = false;
 
-function renderMaster(){
-  const el = document.getElementById("view-master");
+function renderProducts(){
+  const el = document.getElementById("view-products");
   el.innerHTML = `
-    <div class="stack" style="gap:32px">
-      <div class="stack">
-        <div class="section-label">產品</div>
-        <div class="card">
-          <div class="card-head">
-            <h2>建立產品資料</h2>
-            <button class="btn ${showProductForm?"ghost":"accent"} sm" id="btn-toggle-product-form">${icon("plus")}${showProductForm?"取消":"新增產品"}</button>
+    <div class="stack">
+      <div class="card">
+        <div class="card-head">
+          <h2>建立產品資料</h2>
+          <button class="btn ${showProductForm?"ghost":"accent"} sm" id="btn-toggle-product-form">${icon("plus")}${showProductForm?"取消":"新增產品"}</button>
+        </div>
+        ${showProductForm ? `
+        <div class="card-pad stack">
+          <div class="form-row">
+            <div class="field"><label>產品名稱 <span class="req">*</span></label><input type="text" id="f-prod-name" placeholder="例：80CS"></div>
+            <div class="field"><label>規格 / 備註</label><input type="text" id="f-prod-spec" placeholder="選填"></div>
           </div>
-          ${showProductForm ? `
-          <div class="card-pad stack">
-            <div class="form-row">
-              <div class="field"><label>產品名稱 <span class="req">*</span></label><input type="text" id="f-prod-name" placeholder="例：80CS"></div>
-              <div class="field"><label>規格 / 備註</label><input type="text" id="f-prod-spec" placeholder="選填"></div>
-            </div>
-            <div class="field">
-              <label>所屬製程</label>
-              <select id="f-prod-process">
-                <option value="">尚未指定（可稍後再設定）</option>
-                ${state.processes.map(p=>`<option value="${p.id}">${escapeHtml(p.name)}（${stationSeq(p.id).join(" → ") || "尚無站別"}）</option>`).join("")}
-              </select>
-            </div>
-            <div><button class="btn accent" id="btn-add-product">${icon("plus")}確認新增</button></div>
-          </div>` : ""}
-        </div>
-
-        <div class="card">
-          <div class="card-head"><h2>產品清單</h2><span class="hint">${state.products.length} 項</span></div>
-          <div class="table-wrap"><table><thead><tr><th>產品名稱</th><th>規格 / 備註</th><th>所屬製程</th><th>相關工單數</th></tr></thead>
-          <tbody>${state.products.length ? state.products.map(p=>`<tr>
-            <td><b>${escapeHtml(p.name)}</b></td>
-            <td class="muted">${escapeHtml(p.spec||"—")}</td>
-            <td><select data-set-process="${p.id}" style="min-width:160px">
-              <option value="">尚未指定</option>
-              ${state.processes.map(proc=>`<option value="${proc.id}" ${proc.id===p.processId?"selected":""}>${escapeHtml(proc.name)}</option>`).join("")}
-            </select></td>
-            <td class="num">${state.workOrders.filter(w=>w.productId===p.id).length}</td>
-          </tr>`).join("") : `<tr><td colspan="4" class="empty-row">尚未建立產品</td></tr>`}</tbody></table></div>
-        </div>
+          <div class="field">
+            <label>所屬製程</label>
+            <select id="f-prod-process">
+              <option value="">尚未指定（可稍後再設定）</option>
+              ${state.processes.map(p=>`<option value="${p.id}">${escapeHtml(p.name)}（${stationSeq(p.id).join(" → ") || "尚無站別"}）</option>`).join("")}
+            </select>
+          </div>
+          <div><button class="btn accent" id="btn-add-product">${icon("plus")}確認新增</button></div>
+        </div>` : ""}
       </div>
 
-      <div class="stack">
-        <div class="section-label">工單</div>
-        <div class="card">
-          <div class="card-head">
-            <h2>建立生產工單</h2>
-            <button class="btn ${showWoForm?"ghost":"accent"} sm" id="btn-toggle-wo-form" ${state.products.length?"":"disabled"}>${icon("plus")}${showWoForm?"取消":"建立工單"}</button>
-          </div>
-          ${showWoForm ? `
-          <div class="card-pad stack">
-            <div class="form-row">
-              <div class="field"><label>產品 <span class="req">*</span></label>
-                <select id="f-wo-product">${state.products.map(p=>`<option value="${p.id}">${escapeHtml(p.name)}</option>`).join("") || `<option value="">請先建立產品</option>`}</select>
-              </div>
-              <div class="field"><label>工單號碼 <span class="req">*</span></label><input type="text" id="f-wo-no" placeholder="例：WO-20260808-02"></div>
-              <div class="field"><label>預計生產數量 <span class="req">*</span></label><input type="number" id="f-wo-qty" min="1" placeholder="件"></div>
-            </div>
-            <div><button class="btn accent" id="btn-add-wo">${icon("plus")}確認建立</button></div>
-          </div>` : `<div class="card-pad"><span class="muted small">需先建立產品</span></div>`}
-        </div>
-
-        <div class="card">
-          <div class="card-head"><h2>工單清單</h2><span class="hint">點一筆工單即可登記過站</span></div>
-          <div class="table-wrap"><table><thead><tr><th>工單號碼</th><th>產品</th><th>預計數量</th><th>已完成</th><th>目前狀態</th><th>建立時間</th></tr></thead>
-          <tbody>${state.workOrders.length ? state.workOrders.map(w=>{
-            const prod = productById(w.productId); const prog = woProgress(w.id);
-            const done = prog.currentLabel==="已完工";
-            const chip = done ? `<span class="chip success">已完工</span>` : `<span class="chip info">${escapeHtml(prog.currentLabel)}</span>`;
-            return `<tr class="${done?"":"clickable"}" ${done?"":`data-open-transit="${w.id}"`} title="${done?"":"點一下登記過站"}"><td class="num"><b>${escapeHtml(w.no)}</b></td><td>${escapeHtml(prod?prod.name:"—")}</td><td class="num">${w.plannedQty}</td><td class="num">${prog.completed}</td><td>${chip}</td><td class="num small muted">${fmtDateTime(w.createdAt)}</td></tr>`;
-          }).join("") : `<tr><td colspan="6" class="empty-row">尚未建立工單</td></tr>`}</tbody></table></div>
-        </div>
+      <div class="card">
+        <div class="card-head"><h2>產品清單</h2><span class="hint">${state.products.length} 項</span></div>
+        <div class="table-wrap"><table><thead><tr><th>產品名稱</th><th>規格 / 備註</th><th>所屬製程</th><th>相關工單數</th></tr></thead>
+        <tbody>${state.products.length ? state.products.map(p=>`<tr>
+          <td><b>${escapeHtml(p.name)}</b></td>
+          <td class="muted">${escapeHtml(p.spec||"—")}</td>
+          <td><select data-set-process="${p.id}" style="min-width:160px">
+            <option value="">尚未指定</option>
+            ${state.processes.map(proc=>`<option value="${proc.id}" ${proc.id===p.processId?"selected":""}>${escapeHtml(proc.name)}</option>`).join("")}
+          </select></td>
+          <td class="num">${state.workOrders.filter(w=>w.productId===p.id).length}</td>
+        </tr>`).join("") : `<tr><td colspan="4" class="empty-row">尚未建立產品</td></tr>`}</tbody></table></div>
       </div>
     </div>
   `;
-
-  el.querySelectorAll("[data-open-transit]").forEach(tr => tr.addEventListener("click", () => {
-    openTransitModal(tr.dataset.openTransit);
-  }));
 
   document.getElementById("btn-toggle-product-form").addEventListener("click", () => {
     showProductForm = !showProductForm;
@@ -906,6 +867,49 @@ function renderMaster(){
 
   el.querySelectorAll("[data-set-process]").forEach(sel => sel.addEventListener("change", () => {
     withServerSync(() => api(`/api/products/${sel.dataset.setProcess}/process`, "POST", { processId: sel.value || null }));
+  }));
+}
+
+/* ============================= WORK ORDERS ============================= */
+let showWoForm = false;
+
+function renderWorkOrders(){
+  const el = document.getElementById("view-workorders");
+  el.innerHTML = `
+    <div class="stack">
+      <div class="card">
+        <div class="card-head">
+          <h2>建立生產工單</h2>
+          <button class="btn ${showWoForm?"ghost":"accent"} sm" id="btn-toggle-wo-form" ${state.products.length?"":"disabled"}>${icon("plus")}${showWoForm?"取消":"建立工單"}</button>
+        </div>
+        ${showWoForm ? `
+        <div class="card-pad stack">
+          <div class="form-row">
+            <div class="field"><label>產品 <span class="req">*</span></label>
+              <select id="f-wo-product">${state.products.map(p=>`<option value="${p.id}">${escapeHtml(p.name)}</option>`).join("") || `<option value="">請先建立產品</option>`}</select>
+            </div>
+            <div class="field"><label>工單號碼 <span class="req">*</span></label><input type="text" id="f-wo-no" placeholder="例：WO-20260808-02"></div>
+            <div class="field"><label>預計生產數量 <span class="req">*</span></label><input type="number" id="f-wo-qty" min="1" placeholder="件"></div>
+          </div>
+          <div><button class="btn accent" id="btn-add-wo">${icon("plus")}確認建立</button></div>
+        </div>` : `<div class="card-pad"><span class="muted small">需先建立產品</span></div>`}
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>工單清單</h2><span class="hint">點一筆工單即可登記過站</span></div>
+        <div class="table-wrap"><table><thead><tr><th>工單號碼</th><th>產品</th><th>預計數量</th><th>已完成</th><th>目前狀態</th><th>建立時間</th></tr></thead>
+        <tbody>${state.workOrders.length ? state.workOrders.map(w=>{
+          const prod = productById(w.productId); const prog = woProgress(w.id);
+          const done = prog.currentLabel==="已完工";
+          const chip = done ? `<span class="chip success">已完工</span>` : `<span class="chip info">${escapeHtml(prog.currentLabel)}</span>`;
+          return `<tr class="${done?"":"clickable"}" ${done?"":`data-open-transit="${w.id}"`} title="${done?"":"點一下登記過站"}"><td class="num"><b>${escapeHtml(w.no)}</b></td><td>${escapeHtml(prod?prod.name:"—")}</td><td class="num">${w.plannedQty}</td><td class="num">${prog.completed}</td><td>${chip}</td><td class="num small muted">${fmtDateTime(w.createdAt)}</td></tr>`;
+        }).join("") : `<tr><td colspan="6" class="empty-row">尚未建立工單</td></tr>`}</tbody></table></div>
+      </div>
+    </div>
+  `;
+
+  el.querySelectorAll("[data-open-transit]").forEach(tr => tr.addEventListener("click", () => {
+    openTransitModal(tr.dataset.openTransit);
   }));
 
   document.getElementById("btn-toggle-wo-form").addEventListener("click", () => {
@@ -1127,7 +1131,7 @@ function wireStationDragAndDrop(el){
 }
 
 /* ============================= TRANSIT MODAL (過站登記) =============================
-   Opened by clicking a work order row in 產品/工單's 工單清單 — the work order
+   Opened by clicking a work order row in 工單's 工單清單 — the work order
    is already fixed, so this only asks for what's actually needed at that
    moment (站別/數量/人員), not a work-order picker. */
 function openTransitModal(woId){
@@ -1219,7 +1223,7 @@ function wireTransitForm(woId){
     const box = document.getElementById("t-station-avail");
     const prog = woProgress(woId);
     if (!prog.process){
-      box.innerHTML = `<div class="diag-row fail"><div class="diag-icon">${icon("cross")}</div><div><div class="diag-title">此工單的產品尚未指定製程</div><div class="diag-msg">請先至「站別設定」建立製程，並在「產品 / 工單」為此產品指定所屬製程。</div></div></div>`;
+      box.innerHTML = `<div class="diag-row fail"><div class="diag-icon">${icon("cross")}</div><div><div class="diag-title">此工單的產品尚未指定製程</div><div class="diag-msg">請先至「站別設定」建立製程，並在「產品」頁面為此產品指定所屬製程。</div></div></div>`;
       return;
     }
     box.innerHTML = `
@@ -1257,7 +1261,7 @@ async function submitTransit(woId){
   const seq = prog ? prog.seq : [];
   let reason = "", problemType = "", targetStation = "";
 
-  if (wo && !prog.process) errors.push("此工單的產品尚未指定製程，請先至「站別設定」建立製程並在「產品/工單」指定");
+  if (wo && !prog.process) errors.push("此工單的產品尚未指定製程，請先至「站別設定」建立製程並在「產品」頁面指定");
 
   if (type === "skip"){
     reason = (document.getElementById("t-reason")?.value || "").trim();
