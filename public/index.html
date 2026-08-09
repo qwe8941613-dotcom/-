@@ -24,6 +24,9 @@
     --radius: 8px;
     --font-body: -apple-system, "Segoe UI", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
     --font-mono: ui-monospace, "Cascadia Mono", "SFMono-Regular", Consolas, Menlo, monospace;
+    --series-1:#2a78d6; --series-2:#eb6834; --series-3:#1baf7a; --series-4:#eda100;
+    --series-5:#e87ba4; --series-6:#008300; --series-7:#4a3aa7; --series-8:#e34948;
+    --series-other:#AAB4AE;
   }
   @media (prefers-color-scheme: dark){
     :root{
@@ -47,6 +50,9 @@
       --info:#5CBAC4;
       --info-soft:#5CBAC426;
       --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 20px rgba(0,0,0,.35);
+      --series-1:#3987e5; --series-2:#d95926; --series-3:#199e70; --series-4:#c98500;
+      --series-5:#d55181; --series-6:#008300; --series-7:#9085e9; --series-8:#e66767;
+      --series-other:#46524F;
     }
   }
   :root[data-theme="dark"]{
@@ -55,6 +61,9 @@
     --success:#57B279; --success-soft:#57B27926; --warning:#E0AB3E; --warning-soft:#E0AB3E26;
     --danger:#E37164; --danger-soft:#E3716426; --info:#5CBAC4; --info-soft:#5CBAC426;
     --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 20px rgba(0,0,0,.35);
+    --series-1:#3987e5; --series-2:#d95926; --series-3:#199e70; --series-4:#c98500;
+    --series-5:#d55181; --series-6:#008300; --series-7:#9085e9; --series-8:#e66767;
+    --series-other:#46524F;
   }
   :root[data-theme="light"]{
     --bg:#EEF0EE; --surface:#FFFFFF; --surface-2:#E3E7E5; --ink:#1B2422; --ink-dim:#57635F; --ink-faint:#8A948F;
@@ -62,6 +71,9 @@
     --success:#2F7A4F; --success-soft:#2F7A4F1A; --warning:#B4790F; --warning-soft:#B4790F1A;
     --danger:#B23A2E; --danger-soft:#B23A2E1A; --info:#286E78; --info-soft:#286E781A;
     --shadow: 0 1px 2px rgba(20,24,22,.06), 0 4px 14px rgba(20,24,22,.05);
+    --series-1:#2a78d6; --series-2:#eb6834; --series-3:#1baf7a; --series-4:#eda100;
+    --series-5:#e87ba4; --series-6:#008300; --series-7:#4a3aa7; --series-8:#e34948;
+    --series-other:#AAB4AE;
   }
   *{box-sizing:border-box;}
   html,body{margin:0;padding:0;}
@@ -240,6 +252,24 @@
   .stat-bar-track{ flex:1; height:9px; border-radius:5px; background:var(--surface-2); overflow:hidden; }
   .stat-bar-fill{ height:100%; background:var(--accent); }
   .stat-bar-num{ width:60px; text-align:right; font-family:var(--font-mono); font-size:12px; color:var(--ink-dim); }
+
+  /* 依站別統計：站別 x 產品 疊圖長條圖 */
+  .stack-chart{ position:relative; overflow-x:auto; }
+  .stack-chart svg{ display:block; }
+  .stack-chart .axis-line{ stroke:var(--border); stroke-width:1; }
+  .stack-chart .grid-line{ stroke:var(--border); stroke-width:1; opacity:.6; }
+  .stack-chart .axis-label{ fill:var(--ink-faint); font-size:11px; }
+  .stack-chart .bar-total-label{ fill:var(--ink-dim); font-size:11px; font-weight:700; text-anchor:middle; }
+  .stack-chart .seg{ cursor:pointer; }
+  .stack-chart .seg:hover, .stack-chart .seg:focus{ filter:brightness(1.12); outline:none; }
+  .stack-chart .flow-arrow-path{ fill:none; stroke:var(--danger); stroke-width:2; }
+  .stack-chart .flow-arrow-label{ fill:var(--danger); font-size:11px; font-weight:700; }
+  .chart-legend{ display:flex; flex-wrap:wrap; gap:6px 16px; padding-top:10px; margin-top:10px; border-top:1px solid var(--border); }
+  .chart-legend-item{ display:flex; align-items:center; gap:6px; font-size:12px; color:var(--ink-dim); }
+  .chart-legend-swatch{ width:11px; height:11px; border-radius:3px; flex:0 0 auto; }
+  .chart-tooltip{ position:fixed; z-index:50; pointer-events:none; background:var(--surface); border:1px solid var(--border-strong); border-radius:6px; box-shadow:var(--shadow); padding:6px 10px; font-size:12px; color:var(--ink); white-space:nowrap; }
+  .chart-tooltip b{ font-family:var(--font-mono); }
+  .chart-tooltip[hidden]{ display:none; }
 
   .divider{ height:1px; background:var(--border); border:none; margin:2px 0; }
   .muted{ color:var(--ink-faint); }
@@ -657,6 +687,18 @@ function fmtDate(ts){ const d = new Date(ts); return d.getFullYear()+"-"+String(
 function fmtTime(ts){ const d = new Date(ts); return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0"); }
 function fmtDateTime(ts){ return fmtDate(ts)+" "+fmtTime(ts); }
 function escapeHtml(s){ return String(s??"").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+function getChartTooltip(){
+  let t = document.getElementById("chart-tooltip");
+  if (!t){
+    t = document.createElement("div");
+    t.id = "chart-tooltip";
+    t.className = "chart-tooltip";
+    t.hidden = true;
+    document.body.appendChild(t);
+  }
+  return t;
+}
 
 const BLOCK_COLORS = ["#4C97FF","#9966FF","#FF6680","#0FBF9F","#FF9F1C","#59C059","#FF6B57","#6B7FD7"];
 function blockColor(id){
@@ -1488,14 +1530,95 @@ function renderStats(){
     return { name: p.name, qty, wos: wos.length };
   });
   const byWO = state.workOrders.map(w => ({ name: w.no, qty: woProgress(w.id).completed, planned: w.plannedQty }));
-  const byStation = state.stations.map(s => {
-    const qty = state.records.filter(r=>!r.superseded && r.station===s.name).reduce((sum,r)=>sum+r.qty,0);
-    const exQty = state.records.filter(r=>!r.superseded && r.station===s.name && r.type==="exception").reduce((sum,r)=>sum+r.qty,0);
-    return { name: s.name, qty, exQty };
-  });
   const maxProduct = Math.max(1, ...byProduct.map(x=>x.qty));
   const maxWO = Math.max(1, ...byWO.map(x=>x.planned));
-  const maxStation = Math.max(1, ...byStation.map(x=>x.qty));
+
+  // 依站別統計：站別 x 產品 疊圖長條圖。分類色只指派給前 8 個產品（固定順序，
+  // 不循環配色），超過的產品併入「其他」，避免色相多到分不清楚。
+  const SERIES_COLORS = ["var(--series-1)","var(--series-2)","var(--series-3)","var(--series-4)","var(--series-5)","var(--series-6)","var(--series-7)","var(--series-8)"];
+  const productColor = {};
+  state.products.forEach((p, i) => { productColor[p.id] = i < SERIES_COLORS.length ? SERIES_COLORS[i] : "var(--series-other)"; });
+
+  const stationProductChart = state.stations.map(s => {
+    const segments = state.products.map(p => {
+      const woIds = new Set(state.workOrders.filter(w=>w.productId===p.id).map(w=>w.id));
+      const qty = state.records.filter(r=>!r.superseded && r.station===s.name && woIds.has(r.workOrderId)).reduce((sum,r)=>sum+r.qty,0);
+      return { name: p.name, qty, color: productColor[p.id] };
+    }).filter(seg => seg.qty > 0);
+    return { station: s.name, segments, total: segments.reduce((a,b)=>a+b.qty,0) };
+  });
+  const maxStationTotal = Math.max(1, ...stationProductChart.map(x=>x.total));
+
+  // 箭頭標註：畫出「最近一筆過站」實際發生的移動方向與支數，呼應參考圖上
+  // 「生產支數」箭頭的感覺——不是統計彙總，是指出剛剛真的發生的那個過站動作。
+  let flowArrow = null;
+  const latestRecord = state.records.filter(r=>!r.superseded).sort((a,b)=>b.createdAt-a.createdAt)[0];
+  if (latestRecord) {
+    const wo = woById(latestRecord.workOrderId);
+    const prod = wo ? productById(wo.productId) : null;
+    const seq = prod ? stationSeq(prod.processId) : [];
+    let toStation = null;
+    if (latestRecord.type === "exception") {
+      toStation = latestRecord.targetStation;
+    } else {
+      const idx = seq.indexOf(latestRecord.station);
+      if (idx >= 0 && idx < seq.length - 1) toStation = seq[idx + 1];
+    }
+    if (toStation && stationProductChart.some(s=>s.station===latestRecord.station) && stationProductChart.some(s=>s.station===toStation)) {
+      flowArrow = { from: latestRecord.station, to: toStation, qty: latestRecord.qty };
+    }
+  }
+
+  function buildStackChartSvg(data, maxTotal, arrow){
+    const slotW = 64, barW = 22, chartH = 200, padTop = 46, padBottom = 40, padLeft = 34, padRight = 12;
+    const W = Math.max(320, data.length * slotW + padLeft + padRight);
+    const H = padTop + chartH + padBottom;
+    const baseline = padTop + chartH;
+    const yFor = qty => (qty / maxTotal) * chartH;
+
+    const steps = 4;
+    let axisSvg = `<line class="axis-line" x1="${padLeft}" y1="${baseline}" x2="${W-padRight}" y2="${baseline}"/>`;
+    for (let i=1;i<=steps;i++){
+      const y = baseline - (chartH/steps)*i;
+      const val = Math.round((maxTotal/steps)*i);
+      axisSvg += `<line class="grid-line" x1="${padLeft}" y1="${y}" x2="${W-padRight}" y2="${y}"/>`;
+      axisSvg += `<text class="axis-label" x="${padLeft-6}" y="${y+4}" text-anchor="end">${val}</text>`;
+    }
+
+    let barsSvg = "";
+    const barTop = {};
+    data.forEach((d, i) => {
+      const x = padLeft + i*slotW + (slotW-barW)/2;
+      let cursorY = baseline;
+      d.segments.forEach(seg => {
+        const h = Math.max(0, yFor(seg.qty) - 2);
+        cursorY -= (h + 2);
+        barsSvg += `<rect class="seg" tabindex="0" x="${x}" y="${cursorY}" width="${barW}" height="${h}" rx="2" fill="${seg.color}" data-station="${escapeHtml(d.station)}" data-product="${escapeHtml(seg.name)}" data-qty="${seg.qty}"></rect>`;
+      });
+      const topY = baseline - yFor(d.total);
+      barTop[d.station] = { x: x + barW/2, y: topY };
+      if (d.total > 0) barsSvg += `<text class="bar-total-label" x="${x+barW/2}" y="${topY-6}">${d.total}</text>`;
+      barsSvg += `<text class="axis-label" x="${x+barW/2}" y="${baseline+16}" text-anchor="middle">${escapeHtml(d.station)}</text>`;
+    });
+
+    let arrowSvg = "";
+    if (arrow && barTop[arrow.from] && barTop[arrow.to]){
+      const a = barTop[arrow.from], b = barTop[arrow.to];
+      const midX = (a.x + b.x) / 2, midY = Math.min(a.y, b.y) - 26;
+      arrowSvg = `
+        <defs><marker id="flowArrowHead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--danger)"/></marker></defs>
+        <path class="flow-arrow-path" d="M${a.x},${a.y-6} Q${midX},${midY} ${b.x},${b.y-6}" marker-end="url(#flowArrowHead)"/>
+        <text class="flow-arrow-label" x="${midX}" y="${midY-8}" text-anchor="middle">生產支數 ${arrow.qty}</text>`;
+    }
+
+    return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${axisSvg}${barsSvg}${arrowSvg}</svg>`;
+  }
+
+  const stationLegendHtml = `<div class="chart-legend">${state.products.slice(0, SERIES_COLORS.length).map((p,i)=>`
+    <div class="chart-legend-item"><span class="chart-legend-swatch" style="background:${SERIES_COLORS[i]}"></span>${escapeHtml(p.name)}</div>`).join("")}${
+    state.products.length > SERIES_COLORS.length ? `<div class="chart-legend-item"><span class="chart-legend-swatch" style="background:var(--series-other)"></span>其他（${state.products.length - SERIES_COLORS.length}）</div>` : ""
+  }</div>`;
 
   const barBlock = (rows, keyMax, extra) => rows.length ? rows.map(r => `
     <div class="stat-bar-row">
@@ -1571,7 +1694,7 @@ function renderStats(){
   }
 
   el.innerHTML = `
-    <div class="grid cols-3">
+    <div class="grid cols-2">
       <div class="card">
         <div class="card-head"><h2>依產品統計</h2><span class="hint">已完成數量</span></div>
         <div class="card-pad">${barBlock(byProduct, maxProduct, r=>` / ${r.wos} 張工單`)}</div>
@@ -1580,9 +1703,14 @@ function renderStats(){
         <div class="card-head"><h2>依工單統計</h2><span class="hint">完成 / 預計</span></div>
         <div class="card-pad">${barBlock(byWO.map(r=>({name:r.name, qty:r.qty})), maxWO, (r)=>{ const wo=byWO.find(x=>x.name===r.name); return ` / ${wo.planned}`; })}</div>
       </div>
-      <div class="card">
-        <div class="card-head"><h2>依站別統計</h2><span class="hint">通過總數（含分流）</span></div>
-        <div class="card-pad">${barBlock(byStation, maxStation, r=>r.exQty?` (分流 ${r.exQty})`:"")}</div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>依站別統計</h2><span class="hint">依產品疊圖，紅色箭頭標示最近一筆過站的移動方向</span></div>
+      <div class="card-pad">
+        ${!stationProductChart.some(s=>s.total>0) ? `<div class="empty-row muted">尚無資料</div>` : `
+        <div class="stack-chart" id="station-product-chart">${buildStackChartSvg(stationProductChart, maxStationTotal, flowArrow)}</div>
+        ${stationLegendHtml}`}
       </div>
     </div>
 
@@ -1610,6 +1738,23 @@ function renderStats(){
       </div>
     </div>
   `;
+
+  const chartTooltip = getChartTooltip();
+  const showSegTooltip = (seg, x, y) => {
+    chartTooltip.hidden = false;
+    chartTooltip.innerHTML = `<div>${escapeHtml(seg.dataset.station)} · ${escapeHtml(seg.dataset.product)}</div><div><b>${escapeHtml(seg.dataset.qty)}</b> 件</div>`;
+    chartTooltip.style.left = x + "px";
+    chartTooltip.style.top = y + "px";
+  };
+  el.querySelectorAll("#station-product-chart .seg").forEach(seg => {
+    seg.addEventListener("pointermove", (e) => showSegTooltip(seg, e.clientX + 12, e.clientY + 12));
+    seg.addEventListener("pointerleave", () => { chartTooltip.hidden = true; });
+    seg.addEventListener("focus", () => {
+      const rect = seg.getBoundingClientRect();
+      showSegTooltip(seg, rect.left, rect.top - 34);
+    });
+    seg.addEventListener("blur", () => { chartTooltip.hidden = true; });
+  });
 }
 
 /* ============================= HISTORY / CORRECTIONS ============================= */
