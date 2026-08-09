@@ -151,6 +151,19 @@ app.post("/api/products", (req, res) => {
   res.json(product);
 });
 
+app.post("/api/products/:id", (req, res) => {
+  const product = findProduct(req.params.id);
+  if (!product) return res.status(404).json({ error: "找不到此產品" });
+  const name = (req.body.name || "").trim();
+  const spec = (req.body.spec || "").trim();
+  if (!name) return res.status(400).json({ error: "請輸入產品名稱" });
+  if (state.products.some(p => p.name === name && p.id !== product.id)) return res.status(400).json({ error: "此產品名稱已存在" });
+  product.name = name;
+  product.spec = spec;
+  saveState(state);
+  res.json(product);
+});
+
 app.post("/api/products/:id/process", (req, res) => {
   const product = findProduct(req.params.id);
   if (!product) return res.status(404).json({ error: "找不到此產品" });

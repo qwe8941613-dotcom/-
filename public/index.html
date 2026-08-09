@@ -808,6 +808,7 @@ function travelerCard(wo){
 
 /* ============================= PRODUCTS ============================= */
 let showProductForm = false;
+let editingProductId = null;
 
 function renderProducts(){
   const el = document.getElementById("view-products");
@@ -837,16 +838,22 @@ function renderProducts(){
 
       <div class="card">
         <div class="card-head"><h2>產品清單</h2><span class="hint">${state.products.length} 項</span></div>
-        <div class="table-wrap"><table><thead><tr><th>產品名稱</th><th>規格 / 備註</th><th>所屬製程</th><th>相關工單數</th></tr></thead>
-        <tbody>${state.products.length ? state.products.map(p=>`<tr>
-          <td><b>${escapeHtml(p.name)}</b></td>
-          <td class="muted">${escapeHtml(p.spec||"—")}</td>
+        <div class="table-wrap"><table><thead><tr><th>產品名稱</th><th>規格 / 備註</th><th>所屬製程</th><th>相關工單數</th><th></th></tr></thead>
+        <tbody>${state.products.length ? state.products.map(p=>{
+          const editing = editingProductId === p.id;
+          return `<tr>
+          <td>${editing ? `<input type="text" data-edit-name="${p.id}" value="${escapeHtml(p.name)}">` : `<b>${escapeHtml(p.name)}</b>`}</td>
+          <td class="muted">${editing ? `<input type="text" data-edit-spec="${p.id}" value="${escapeHtml(p.spec||"")}">` : escapeHtml(p.spec||"—")}</td>
           <td><select data-set-process="${p.id}" style="min-width:160px">
             <option value="">尚未指定</option>
             ${state.processes.map(proc=>`<option value="${proc.id}" ${proc.id===p.processId?"selected":""}>${escapeHtml(proc.name)}</option>`).join("")}
           </select></td>
           <td class="num">${state.workOrders.filter(w=>w.productId===p.id).length}</td>
-        </tr>`).join("") : `<tr><td colspan="4" class="empty-row">尚未建立產品</td></tr>`}</tbody></table></div>
+          <td>${editing
+            ? `<button class="btn ghost sm" data-save-product="${p.id}">${icon("check")}儲存</button> <button class="btn ghost sm" data-cancel-edit-product>${icon("cross")}</button>`
+            : `<button class="btn ghost sm" data-edit-product="${p.id}">編輯</button>`}</td>
+        </tr>`;
+        }).join("") : `<tr><td colspan="5" class="empty-row">尚未建立產品</td></tr>`}</tbody></table></div>
       </div>
     </div>
   `;
@@ -867,6 +874,23 @@ function renderProducts(){
 
   el.querySelectorAll("[data-set-process]").forEach(sel => sel.addEventListener("change", () => {
     withServerSync(() => api(`/api/products/${sel.dataset.setProcess}/process`, "POST", { processId: sel.value || null }));
+  }));
+
+  el.querySelectorAll("[data-edit-product]").forEach(b => b.addEventListener("click", () => {
+    editingProductId = b.dataset.editProduct;
+    render();
+  }));
+  el.querySelectorAll("[data-cancel-edit-product]").forEach(b => b.addEventListener("click", () => {
+    editingProductId = null;
+    render();
+  }));
+  el.querySelectorAll("[data-save-product]").forEach(b => b.addEventListener("click", async () => {
+    const id = b.dataset.saveProduct;
+    const name = el.querySelector(`[data-edit-name="${id}"]`).value.trim();
+    const spec = el.querySelector(`[data-edit-spec="${id}"]`).value.trim();
+    if (!name){ alert("請輸入產品名稱"); return; }
+    const ok = await withServerSync(() => api(`/api/products/${id}`, "POST", { name, spec }));
+    if (ok){ editingProductId = null; render(); }
   }));
 }
 
