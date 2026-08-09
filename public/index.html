@@ -130,6 +130,8 @@
   .grid.cols-3{ grid-template-columns:repeat(3,1fr); }
   .grid.cols-4{ grid-template-columns:repeat(4,1fr); }
   @media (max-width:1000px){ .grid.cols-2, .grid.cols-3, .grid.cols-4{ grid-template-columns:1fr; } }
+  /* 產品/工單頁的產品欄與工單欄要一直並排顯示，不要在窄視窗下疊成一欄 */
+  #view-master .grid.cols-2{ grid-template-columns:1fr 1fr; }
 
   .field{ display:flex; flex-direction:column; gap:5px; }
   .field label{ font-size:11.5px; font-weight:700; color:var(--ink-dim); letter-spacing:.02em; }
@@ -807,7 +809,6 @@ function travelerCard(wo){
 /* ============================= MASTER (products & work orders) ============================= */
 let showProductForm = false;
 let showWoForm = false;
-let statsProductId = null;
 
 function renderMaster(){
   const el = document.getElementById("view-master");
@@ -1474,9 +1475,6 @@ function renderStats(){
       <div class="stat-bar-num num">${r.qty}${extra?extra(r):""}</div>
     </div>`).join("") : `<div class="empty-row muted">尚無資料</div>`;
 
-  if (!statsProductId || !productById(statsProductId)) statsProductId = state.products.length ? state.products[0].id : null;
-  const flowProduct = statsProductId ? productById(statsProductId) : null;
-  const flowSeq = flowProduct ? stationSeq(flowProduct.processId) : [];
   // Same station name can occur more than once in one process (see 站別設定's
   // repeatable blocks), so a pass at that name is attributed to a specific
   // SEQUENCE POSITION — replaying each work order's own log, exactly like
@@ -1490,54 +1488,58 @@ function renderStats(){
     }
     return -1;
   }
-  const flowWos = flowProduct ? state.workOrders.filter(w=>w.productId===statsProductId) : [];
-  const cellTotals = {}; // `${date}|${idx}` -> qty
-  flowWos.forEach(wo => {
-    const arrived = {}, departed = {};
-    if (flowSeq.length) arrived[0] = wo.plannedQty;
-    activeRecordsFor(wo.id).forEach(r => {
-      if (r.type === "normal") {
-        const idx = findActiveIdxForFlow(flowSeq, arrived, departed, r.station);
-        if (idx < 0) return;
-        departed[idx] = (departed[idx] || 0) + r.qty;
-        cellTotals[`${r.date}|${idx}`] = (cellTotals[`${r.date}|${idx}`] || 0) + r.qty;
-        if (idx < flowSeq.length - 1) arrived[idx + 1] = (arrived[idx + 1] || 0) + r.qty;
-      } else if (r.type === "skip") {
-        let remaining = r.qty;
-        for (let i = 0; i < flowSeq.length && remaining > 0; i++) {
-          const here = Math.max((arrived[i] || 0) - (departed[i] || 0), 0);
-          if (here <= 0) continue;
-          const take = Math.min(here, remaining);
-          departed[i] = (departed[i] || 0) + take;
-          remaining -= take;
-        }
-        const idx = flowSeq.indexOf(r.station);
-        if (idx >= 0) {
+  function buildFlowData(product) {
+    const seq = stationSeq(product.processId);
+    const wos = state.workOrders.filter(w=>w.productId===product.id);
+    const cellTotals = {}; // `${date}|${idx}` -> qty
+    wos.forEach(wo => {
+      const arrived = {}, departed = {};
+      if (seq.length) arrived[0] = wo.plannedQty;
+      activeRecordsFor(wo.id).forEach(r => {
+        if (r.type === "normal") {
+          const idx = findActiveIdxForFlow(seq, arrived, departed, r.station);
+          if (idx < 0) return;
+          departed[idx] = (departed[idx] || 0) + r.qty;
           cellTotals[`${r.date}|${idx}`] = (cellTotals[`${r.date}|${idx}`] || 0) + r.qty;
-          if (idx < flowSeq.length - 1) arrived[idx + 1] = (arrived[idx + 1] || 0) + r.qty;
+          if (idx < seq.length - 1) arrived[idx + 1] = (arrived[idx + 1] || 0) + r.qty;
+        } else if (r.type === "skip") {
+          let remaining = r.qty;
+          for (let i = 0; i < seq.length && remaining > 0; i++) {
+            const here = Math.max((arrived[i] || 0) - (departed[i] || 0), 0);
+            if (here <= 0) continue;
+            const take = Math.min(here, remaining);
+            departed[i] = (departed[i] || 0) + take;
+            remaining -= take;
+          }
+          const idx = seq.indexOf(r.station);
+          if (idx >= 0) {
+            cellTotals[`${r.date}|${idx}`] = (cellTotals[`${r.date}|${idx}`] || 0) + r.qty;
+            if (idx < seq.length - 1) arrived[idx + 1] = (arrived[idx + 1] || 0) + r.qty;
+          }
+        } else if (r.type === "exception") {
+          const fromIdx = findActiveIdxForFlow(seq, arrived, departed, r.station);
+          if (fromIdx >= 0) {
+            departed[fromIdx] = (departed[fromIdx] || 0) + r.qty;
+            cellTotals[`${r.date}|${fromIdx}`] = (cellTotals[`${r.date}|${fromIdx}`] || 0) + r.qty;
+          }
+          const toIdx = seq.indexOf(r.targetStation);
+          if (toIdx >= 0) arrived[toIdx] = (arrived[toIdx] || 0) + r.qty;
         }
-      } else if (r.type === "exception") {
-        const fromIdx = findActiveIdxForFlow(flowSeq, arrived, departed, r.station);
-        if (fromIdx >= 0) {
-          departed[fromIdx] = (departed[fromIdx] || 0) + r.qty;
-          cellTotals[`${r.date}|${fromIdx}`] = (cellTotals[`${r.date}|${fromIdx}`] || 0) + r.qty;
-        }
-        const toIdx = flowSeq.indexOf(r.targetStation);
-        if (toIdx >= 0) arrived[toIdx] = (arrived[toIdx] || 0) + r.qty;
-      }
+      });
     });
-  });
-  const flowDates = [...new Set(Object.keys(cellTotals).map(k=>k.split("|")[0]))].sort();
-  const flowMatrix = flowDates.map(date => {
-    const cells = flowSeq.map((name, idx) => cellTotals[`${date}|${idx}`] || 0);
-    return { date, cells, total: cells.reduce((a,b)=>a+b,0) };
-  });
-  const nameSeen = {};
-  const flowSeqLabels = flowSeq.map(name => {
-    nameSeen[name] = (nameSeen[name] || 0) + 1;
-    const occurrences = flowSeq.filter(n=>n===name).length;
-    return occurrences > 1 ? `${name}（第${nameSeen[name]}次）` : name;
-  });
+    const dates = [...new Set(Object.keys(cellTotals).map(k=>k.split("|")[0]))].sort();
+    const matrix = dates.map(date => {
+      const cells = seq.map((name, idx) => cellTotals[`${date}|${idx}`] || 0);
+      return { date, cells, total: cells.reduce((a,b)=>a+b,0) };
+    });
+    const nameSeen = {};
+    const seqLabels = seq.map(name => {
+      nameSeen[name] = (nameSeen[name] || 0) + 1;
+      const occurrences = seq.filter(n=>n===name).length;
+      return occurrences > 1 ? `${name}（第${nameSeen[name]}次）` : name;
+    });
+    return { seq, seqLabels, matrix };
+  }
 
   el.innerHTML = `
     <div class="grid cols-3">
@@ -1556,32 +1558,29 @@ function renderStats(){
     </div>
 
     <div class="card">
-      <div class="card-head"><h2>生產流程圖表</h2><span class="hint">單一產品的過站數量，依日期 × 站別呈現</span></div>
+      <div class="card-head"><h2>生產流程圖表</h2><span class="hint">全部產品的過站數量，依日期 × 站別呈現</span></div>
       <div class="card-pad stack">
-        <div class="field" style="max-width:280px">
-          <label>選擇產品</label>
-          <select id="f-stats-product">${state.products.map(p=>`<option value="${p.id}" ${p.id===statsProductId?"selected":""}>${escapeHtml(p.name)}</option>`).join("") || `<option value="">尚未建立產品</option>`}</select>
-        </div>
-        ${!flowProduct ? `<div class="empty-row muted">尚未建立產品</div>`
-          : !flowSeq.length ? `<div class="empty-row muted">此產品尚未指定製程，無法顯示流程圖表</div>`
-          : !flowMatrix.length ? `<div class="empty-row muted">此產品尚無過站紀錄</div>`
-          : `<div class="table-wrap"><table>
-            <thead><tr><th>日期</th>${flowSeqLabels.map(name=>`<th>${escapeHtml(name)}</th>`).join("")}<th>當日合計</th></tr></thead>
-            <tbody>${flowMatrix.map(row => `<tr>
-              <td class="num small muted">${escapeHtml(row.date)}</td>
-              ${row.cells.map(qty => `<td class="num" style="${qty?"background:var(--accent-soft)":""}">${qty||"—"}</td>`).join("")}
-              <td class="num"><b>${row.total}</b></td>
-            </tr>`).join("")}</tbody>
-          </table></div>`}
+        ${!state.products.length ? `<div class="empty-row muted">尚未建立產品</div>` : state.products.map(p => {
+          const { seqLabels, matrix } = buildFlowData(p);
+          return `<div class="card" style="box-shadow:none">
+            <div class="card-pad stack">
+              <b>${escapeHtml(p.name)}</b>
+              ${!seqLabels.length ? `<div class="empty-row muted">此產品尚未指定製程，無法顯示流程圖表</div>`
+                : !matrix.length ? `<div class="empty-row muted">此產品尚無過站紀錄</div>`
+                : `<div class="table-wrap"><table>
+                  <thead><tr><th>日期</th>${seqLabels.map(name=>`<th>${escapeHtml(name)}</th>`).join("")}<th>當日合計</th></tr></thead>
+                  <tbody>${matrix.map(row => `<tr>
+                    <td class="num small muted">${escapeHtml(row.date)}</td>
+                    ${row.cells.map(qty => `<td class="num" style="${qty?"background:var(--accent-soft)":""}">${qty||"—"}</td>`).join("")}
+                    <td class="num"><b>${row.total}</b></td>
+                  </tr>`).join("")}</tbody>
+                </table></div>`}
+            </div>
+          </div>`;
+        }).join("")}
       </div>
     </div>
   `;
-
-  const selStatsProduct = document.getElementById("f-stats-product");
-  if (selStatsProduct) selStatsProduct.addEventListener("change", () => {
-    statsProductId = selStatsProduct.value || null;
-    renderStats();
-  });
 }
 
 /* ============================= HISTORY / CORRECTIONS ============================= */
