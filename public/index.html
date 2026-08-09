@@ -1539,10 +1539,16 @@ function renderStats(){
   const productColor = {};
   state.products.forEach((p, i) => { productColor[p.id] = i < SERIES_COLORS.length ? SERIES_COLORS[i] : "var(--series-other)"; });
 
+  // 這裡要顯示的是「現在停留在這一站的數量」，不是「歷史上總共經過幾次」——
+  // 過站之後貨就離開原本那一站、進到下一站，所以要用 replay() 的目前佇列
+  // （跟總覽的過站進度、過站登記視窗算「可用數量」用的是同一套邏輯），
+  // 而不是單純加總這一站曾經出現過幾筆紀錄。
   const stationProductChart = state.stations.map(s => {
     const segments = state.products.map(p => {
-      const woIds = new Set(state.workOrders.filter(w=>w.productId===p.id).map(w=>w.id));
-      const qty = state.records.filter(r=>!r.superseded && r.station===s.name && woIds.has(r.workOrderId)).reduce((sum,r)=>sum+r.qty,0);
+      let qty = 0;
+      state.workOrders.filter(w=>w.productId===p.id).forEach(wo => {
+        replay(wo.id).queues.forEach(q => { if (q.name === s.name) qty += q.qty; });
+      });
       return { name: p.name, qty, color: productColor[p.id] };
     }).filter(seg => seg.qty > 0);
     return { station: s.name, segments, total: segments.reduce((a,b)=>a+b.qty,0) };
@@ -1706,7 +1712,7 @@ function renderStats(){
     </div>
 
     <div class="card">
-      <div class="card-head"><h2>依站別統計</h2><span class="hint">依產品疊圖，紅色箭頭標示最近一筆過站的移動方向</span></div>
+      <div class="card-head"><h2>依站別統計</h2><span class="hint">目前停留在各站的數量，依產品疊圖；紅色箭頭標示最近一筆過站的移動方向</span></div>
       <div class="card-pad">
         ${!stationProductChart.some(s=>s.total>0) ? `<div class="empty-row muted">尚無資料</div>` : `
         <div class="stack-chart" id="station-product-chart">${buildStackChartSvg(stationProductChart, maxStationTotal, flowArrow)}</div>
