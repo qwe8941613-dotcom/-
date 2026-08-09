@@ -66,9 +66,9 @@ function buildSystemContext() {
     `已設定產品：${productLines}`,
     `已設定站別積木：${state.stations.map(s => s.name).join("、") || "（無）"}`,
     `已設定製程（各自的站別順序）：${processLines}`,
-    `已設定問題類型與後續站別：${state.exceptionTypes.map(e => `${e.type}→${e.targetStationName}`).join("、") || "（無）"}`,
+    `已設定分流原因與後續站別：${state.exceptionTypes.map(e => `${e.type}→${e.targetStationName}`).join("、") || "（無）"}`,
     `所有工單狀態：${activeWOs.map(x => `${x.wo.no}／產品 ${(findProduct(x.wo.productId) || {}).name || "未知"}／${x.prog.currentLabel === "已完工" ? "已完工" : `目前應於「${x.prog.currentLabel}」過站`}／預計 ${x.wo.plannedQty} 件／已完成 ${x.prog.completed} 件`).join("；") || "（無）"}`,
-    `等待接收的異常：${state.records.filter(r => r.type === "exception" && !r.superseded && !r.received).map(r => `${r.productName}於「${r.station}」發生「${r.problemType}」，${r.qty} 件，等待「${r.targetStation}」接收`).join("；") || "（無）"}`,
+    `等待接收的分流：${state.records.filter(r => r.type === "exception" && !r.superseded && !r.received).map(r => `${r.productName}於「${r.station}」發生「${r.problemType}」，${r.qty} 件，等待「${r.targetStation}」接收`).join("；") || "（無）"}`,
   ].join("\n");
 }
 
@@ -258,9 +258,9 @@ app.delete("/api/processes/:id/stations/:stationId", (req, res) => {
 app.post("/api/exceptiontypes", (req, res) => {
   const type = (req.body.type || "").trim();
   const targetStationName = req.body.targetStationName;
-  if (!type) return res.status(400).json({ error: "請輸入問題類型" });
+  if (!type) return res.status(400).json({ error: "請輸入分流原因" });
   if (!findStation(targetStationName)) return res.status(400).json({ error: "後續處理站別不存在" });
-  if (findExType(type)) return res.status(400).json({ error: "此問題類型已存在" });
+  if (findExType(type)) return res.status(400).json({ error: "此分流原因已存在" });
   const ex = { id: uid("ex"), type, targetStationName };
   state.exceptionTypes.push(ex);
   saveState(state);
@@ -294,7 +294,7 @@ app.post("/api/assistant/chat", async (req, res) => {
     return res.status(429).json({ error: `已達每小時 ${ASSISTANT_RATE_LIMIT} 次的使用上限，請約 ${limit.retryAfterMinutes} 分鐘後再試。` });
   }
 
-  const systemPrompt = `你是生產流程管理系統的查詢助理，只回答關於目前系統資料的問題（工單進度、站別狀態、異常紀錄等），語氣簡短直接。
+  const systemPrompt = `你是生產流程管理系統的查詢助理，只回答關於目前系統資料的問題（工單進度、站別狀態、分流紀錄等），語氣簡短直接。
 
 規則：
 - 只能根據下面提供的「系統目前資料」回答，不可以編造資料中沒有的內容
@@ -361,8 +361,8 @@ app.post("/api/records", (req, res) => {
     const avail = PFMLogic.totalInProcess(state, wo.id);
     if (qty > avail) return res.status(400).json({ error: `數量超過工單目前總在製數量（目前在製 ${avail} 件）` });
   } else if (type === "exception") {
-    if (!(problemType || "").trim()) return res.status(400).json({ error: "請選擇問題類型" });
-    if (!findStation(targetStation)) return res.status(400).json({ error: "問題類型尚未對應後續站別" });
+    if (!(problemType || "").trim()) return res.status(400).json({ error: "請選擇分流原因" });
+    if (!findStation(targetStation)) return res.status(400).json({ error: "分流原因尚未對應後續站別" });
     const avail = PFMLogic.available(state, wo.id, station);
     if (qty > avail) return res.status(400).json({ error: `數量超過「${station}」可過站數量（目前可用 ${avail} 件）` });
   } else {

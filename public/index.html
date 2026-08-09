@@ -670,9 +670,9 @@ function woProgress(woId){ return PFMLogic.woProgress(state, woId); }
 const NAV = [
   { id:"dashboard", label:"總覽", icon:"dashboard", title:"總覽", sub:"工單、站別與過站狀態一覽" },
   { id:"master", label:"產品 / 工單", icon:"box", title:"產品與工單", sub:"建立產品資料與生產工單" },
-  { id:"stations", label:"站別設定", icon:"route", title:"站別設定", sub:"設定製程順序與異常處理分支" },
+  { id:"stations", label:"站別設定", icon:"route", title:"站別設定", sub:"設定製程順序與分流設定" },
   { id:"ai", label:"AI 助理", icon:"spark", title:"AI 助理", sub:"詢問目前生產狀況，AI 會依系統即時資料回答（唯讀，不會建立或修改紀錄）" },
-  { id:"exceptions", label:"異常追蹤", icon:"alert", title:"異常追蹤", sub:"問題類型與後續站別接收狀態" },
+  { id:"exceptions", label:"分流追蹤", icon:"alert", title:"分流追蹤", sub:"分流原因與後續站別接收狀態" },
   { id:"stats", label:"統計報表", icon:"chart", title:"統計報表", sub:"依產品、工單、站別統計數量" },
   { id:"history", label:"修正紀錄", icon:"history", title:"修正紀錄", sub:"追查輸入錯誤與異動前後對照" },
 ];
@@ -716,7 +716,7 @@ function renderDashboard(){
       <div class="card kpi accent"><div class="kpi-num num">${totalWO}</div><div class="kpi-label">生產工單總數</div></div>
       <div class="card kpi warn"><div class="kpi-num num">${inProgress}</div><div class="kpi-label">生產中</div></div>
       <div class="card kpi ok"><div class="kpi-num num">${done}</div><div class="kpi-label">已完工</div></div>
-      <div class="card kpi danger"><div class="kpi-num num">${pendingEx}</div><div class="kpi-label">異常待接收</div></div>
+      <div class="card kpi danger"><div class="kpi-num num">${pendingEx}</div><div class="kpi-label">待接收分流</div></div>
     </div>
 
     <div class="card">
@@ -745,7 +745,7 @@ function renderDashboard(){
   const recent = state.records.filter(r=>!r.superseded).sort((a,b)=>b.createdAt-a.createdAt).slice(0,12);
   document.getElementById("dash-recent").innerHTML = recent.length ? recent.map(r => {
     const wo = woById(r.workOrderId);
-    const typeChip = r.type==="normal" ? `<span class="chip success">正常過站</span>` : r.type==="skip" ? `<span class="chip warning">跳站</span>` : `<span class="chip danger">異常過站</span>`;
+    const typeChip = r.type==="normal" ? `<span class="chip success">正常過站</span>` : r.type==="skip" ? `<span class="chip warning">跳站</span>` : `<span class="chip danger">分流過站</span>`;
     return `<tr><td class="num small">${escapeHtml(r.date)} ${escapeHtml(r.time)}</td><td class="num">${escapeHtml(wo?wo.no:"—")}</td><td>${escapeHtml(r.productName)}</td><td>${escapeHtml(r.station)}</td><td>${typeChip}</td><td class="num">${r.qty}</td><td>${escapeHtml(r.operator)}</td></tr>`;
   }).join("") : `<tr><td colspan="7" class="empty-row">尚無過站紀錄</td></tr>`;
 }
@@ -923,12 +923,12 @@ function renderStations(){
         </div>
       </div>
       <div class="card">
-        <div class="card-head"><h2>異常處理分支</h2><span class="hint">問題類型 → 後續處理站別</span></div>
+        <div class="card-head"><h2>分流設定</h2><span class="hint">分流原因 → 後續處理站別（不限異常，任何需要轉去其他站的原因都可以設定）</span></div>
         <div class="card-pad stack">
-          <div class="table-wrap"><table><thead><tr><th>問題類型</th><th>後續站別</th><th></th></tr></thead>
+          <div class="table-wrap"><table><thead><tr><th>分流原因</th><th>後續站別</th><th></th></tr></thead>
           <tbody id="ex-type-list"></tbody></table></div>
           <div class="form-row">
-            <div class="field"><label>問題類型</label><input type="text" id="f-ex-type" placeholder="例：Block 不良"></div>
+            <div class="field"><label>分流原因</label><input type="text" id="f-ex-type" placeholder="例：Block 不良、客戶要求複檢"></div>
             <div class="field"><label>後續處理站別</label><select id="f-ex-target">${state.stations.map(s=>`<option>${escapeHtml(s.name)}</option>`).join("")}</select></div>
             <div class="field" style="flex:0 0 auto; align-self:flex-end"><button class="btn accent" id="btn-add-extype">${icon("plus")}新增</button></div>
           </div>
@@ -955,7 +955,7 @@ function renderStations(){
   document.getElementById("ex-type-list").innerHTML = state.exceptionTypes.length ? state.exceptionTypes.map(e => `
     <tr><td><b>${escapeHtml(e.type)}</b></td><td><span class="chip info">${escapeHtml(e.targetStationName)}</span></td>
     <td><button class="btn ghost sm" data-del-ex="${e.id}">${icon("trash")}</button></td></tr>`).join("")
-    : `<tr><td colspan="3" class="empty-row">尚未設定異常分支</td></tr>`;
+    : `<tr><td colspan="3" class="empty-row">尚未設定分流原因</td></tr>`;
 
   const procList = document.getElementById("process-list");
   procList.innerHTML = state.processes.length ? state.processes.map(proc => {
@@ -994,7 +994,7 @@ function renderStations(){
   document.getElementById("btn-add-extype").addEventListener("click", () => {
     const type = document.getElementById("f-ex-type").value.trim();
     const targetStationName = document.getElementById("f-ex-target").value;
-    if (!type){ alert("請輸入問題類型"); return; }
+    if (!type){ alert("請輸入分流原因"); return; }
     if (!targetStationName){ alert("請先設定至少一個站別"); return; }
     withServerSync(() => api("/api/exceptiontypes", "POST", { type, targetStationName }));
   });
@@ -1129,7 +1129,7 @@ function transitFormHtml(){
           <div class="radio-row" id="t-type-row">
             <label class="radio-chip checked"><input type="radio" name="ttype" value="normal" checked>正常過站</label>
             <label class="radio-chip"><input type="radio" name="ttype" value="skip">跳站（需填原因）</label>
-            <label class="radio-chip"><input type="radio" name="ttype" value="exception">異常過站</label>
+            <label class="radio-chip"><input type="radio" name="ttype" value="exception">分流過站（需填原因）</label>
           </div>
         </div>
         <div id="t-conditional"></div>
@@ -1161,8 +1161,8 @@ function wireTransitForm(woId){
     } else if (type === "exception"){
       cond.innerHTML = `
         <div class="form-row">
-          <div class="field"><label>問題類型 <span class="req">*</span></label>
-            <select id="t-problem">${state.exceptionTypes.length ? state.exceptionTypes.map(e=>`<option value="${escapeHtml(e.type)}" data-target="${escapeHtml(e.targetStationName)}">${escapeHtml(e.type)}</option>`).join("") : `<option value="">尚未設定問題類型</option>`}</select>
+          <div class="field"><label>分流原因 <span class="req">*</span></label>
+            <select id="t-problem">${state.exceptionTypes.length ? state.exceptionTypes.map(e=>`<option value="${escapeHtml(e.type)}" data-target="${escapeHtml(e.targetStationName)}">${escapeHtml(e.type)}</option>`).join("") : `<option value="">尚未設定分流原因</option>`}</select>
           </div>
           <div class="field"><label>後續處理站別</label><input type="text" id="t-target" readonly></div>
         </div>`;
@@ -1243,8 +1243,8 @@ async function submitTransit(woId){
   if (type === "exception"){
     problemType = document.getElementById("t-problem")?.value || "";
     targetStation = document.getElementById("t-target")?.value || "";
-    if (!problemType) errors.push("請選擇問題類型");
-    if (!targetStation) errors.push("問題類型尚未對應後續站別，請至站別設定新增");
+    if (!problemType) errors.push("請選擇分流原因");
+    if (!targetStation) errors.push("分流原因尚未對應後續站別，請至站別設定新增");
   }
   if (type === "normal" && wo){
     const idx = seq.indexOf(station);
@@ -1284,11 +1284,11 @@ async function submitTransit(woId){
 
 function ticketHtml(rec, wo){
   const rows = [
-    ["登記結果", rec.type==="normal"?"正常過站":rec.type==="skip"?"跳站過站":"異常過站"],
+    ["登記結果", rec.type==="normal"?"正常過站":rec.type==="skip"?"跳站過站":"分流過站"],
     ["產品", rec.productName], ["工單", wo.no], ["操作人員", rec.operator], ["發生站別", rec.station],
   ];
   if (rec.type==="skip") rows.push(["跳站原因", rec.reason]);
-  if (rec.type==="exception"){ rows.push(["問題類型", rec.problemType], ["異常數量", rec.qty+" 件"], ["後續站別", rec.targetStation]); }
+  if (rec.type==="exception"){ rows.push(["分流原因", rec.problemType], ["分流數量", rec.qty+" 件"], ["後續站別", rec.targetStation]); }
   else { rows.push(["數量", rec.qty+" 件"]); }
   rows.push(["狀態", rec.type==="exception" ? `等待${rec.targetStation}接收` : "已登記"]);
   return `<div class="ticket">${rows.map(([k,v])=>`<div class="t-row"><span class="t-key">${escapeHtml(k)}</span><span class="t-val">${escapeHtml(v)}</span></div>`).join("")}
@@ -1389,9 +1389,9 @@ function renderExceptions(){
   const list = state.records.filter(r => r.type==="exception" && !r.superseded).sort((a,b)=>b.createdAt-a.createdAt);
   el.innerHTML = `
     <div class="card">
-      <div class="card-head"><h2>異常過站紀錄</h2><span class="hint">${list.length} 筆</span></div>
+      <div class="card-head"><h2>分流紀錄</h2><span class="hint">${list.length} 筆</span></div>
       <div class="table-wrap"><table>
-        <thead><tr><th>時間</th><th>工單</th><th>產品</th><th>發生站別</th><th>問題類型</th><th>數量</th><th>操作人員</th><th>後續站別</th><th>狀態</th><th></th></tr></thead>
+        <thead><tr><th>時間</th><th>工單</th><th>產品</th><th>發生站別</th><th>分流原因</th><th>數量</th><th>操作人員</th><th>後續站別</th><th>狀態</th><th></th></tr></thead>
         <tbody>${list.length ? list.map(r => {
           const wo = woById(r.workOrderId);
           return `<tr>
@@ -1399,14 +1399,14 @@ function renderExceptions(){
             <td class="num">${escapeHtml(wo?wo.no:"—")}</td>
             <td>${escapeHtml(r.productName)}</td>
             <td>${escapeHtml(r.station)}</td>
-            <td><span class="chip danger">${escapeHtml(r.problemType)}</span></td>
+            <td><span class="chip info">${escapeHtml(r.problemType)}</span></td>
             <td class="num">${r.qty}</td>
             <td>${escapeHtml(r.operator)}</td>
             <td>${escapeHtml(r.targetStation)}</td>
             <td>${r.received ? `<span class="chip success">已接收</span>` : `<span class="chip warning">等待接收</span>`}</td>
             <td>${r.received ? "" : `<button class="btn sm accent" data-receive="${r.id}">標記已接收</button>`}</td>
           </tr>`;
-        }).join("") : `<tr><td colspan="10" class="empty-row">目前沒有異常紀錄</td></tr>`}</tbody>
+        }).join("") : `<tr><td colspan="10" class="empty-row">目前沒有分流紀錄</td></tr>`}</tbody>
       </table></div>
     </div>
   `;
@@ -1451,8 +1451,8 @@ function renderStats(){
         <div class="card-pad">${barBlock(byWO.map(r=>({name:r.name, qty:r.qty})), maxWO, (r)=>{ const wo=byWO.find(x=>x.name===r.name); return ` / ${wo.planned}`; })}</div>
       </div>
       <div class="card">
-        <div class="card-head"><h2>依站別統計</h2><span class="hint">通過總數（含異常）</span></div>
-        <div class="card-pad">${barBlock(byStation, maxStation, r=>r.exQty?` (異常 ${r.exQty})`:"")}</div>
+        <div class="card-head"><h2>依站別統計</h2><span class="hint">通過總數（含分流）</span></div>
+        <div class="card-pad">${barBlock(byStation, maxStation, r=>r.exQty?` (分流 ${r.exQty})`:"")}</div>
       </div>
     </div>
   `;
@@ -1469,7 +1469,7 @@ function renderHistory(){
         <thead><tr><th>時間</th><th>工單</th><th>站別</th><th>類型</th><th>數量</th><th>操作人員</th><th>狀態</th><th></th></tr></thead>
         <tbody>${all.length ? all.map(r => {
           const wo = woById(r.workOrderId);
-          const t = r.type==="normal"?`<span class="chip success">正常</span>`:r.type==="skip"?`<span class="chip warning">跳站</span>`:`<span class="chip danger">異常</span>`;
+          const t = r.type==="normal"?`<span class="chip success">正常</span>`:r.type==="skip"?`<span class="chip warning">跳站</span>`:`<span class="chip info">分流</span>`;
           const status = r.superseded ? `<span class="chip neutral">已被更正</span>` : r.correctionOf ? `<span class="chip info">更正版本</span>` : `<span class="chip neutral">原始</span>`;
           return `<tr>
             <td class="num small">${escapeHtml(r.date)} ${escapeHtml(r.time)}</td>
