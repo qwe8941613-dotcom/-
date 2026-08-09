@@ -406,54 +406,72 @@ const PFMLogic = (function(){
     return ctx.records.filter(r => r.workOrderId === woId && !r.superseded).sort((a, b) => a.createdAt - b.createdAt);
   }
 
+  // A station block can appear more than once in the same process (e.g. a
+  // batch that visits 接 Block, then comes back to it later). Tracking by
+  // station NAME alone can't tell those occurrences apart, so `arrived`/
+  // `departed` below are keyed by SEQUENCE POSITION (index), not name. Given a
+  // station name, the "active" occurrence is the earliest position holding
+  // that name with qty still sitting there — first-in-line, matching how a
+  // linear process actually drains.
+  function findActiveIndex(seq, arrived, departed, stationName) {
+    for (let i = 0; i < seq.length; i++) {
+      if (seq[i] !== stationName) continue;
+      if (((arrived[i] || 0) - (departed[i] || 0)) > 0) return i;
+    }
+    return -1;
+  }
+
   /* Replay a work order's records against its product's process sequence to
      derive per-station queue levels, completed qty and current position. */
   function replay(ctx, woId) {
     const wo = woById(ctx, woId);
     const proc = processForWO(ctx, wo);
     const seq = stationSeq(ctx, proc ? proc.id : null);
-    const arrived = {}, departed = {};
-    if (seq.length) arrived[seq[0]] = wo ? wo.plannedQty : 0;
+    const arrived = {}, departed = {}; // keyed by index into `seq`
+    if (seq.length) arrived[0] = wo ? wo.plannedQty : 0;
     let completed = 0;
     const pendingExceptions = [];
     const log = activeRecordsFor(ctx, woId);
     log.forEach(r => {
       if (r.type === "normal") {
-        departed[r.station] = (departed[r.station] || 0) + r.qty;
-        const idx = seq.indexOf(r.station);
-        if (idx >= 0 && idx === seq.length - 1) { completed += r.qty; }
-        else if (idx >= 0) { const nxt = seq[idx + 1]; arrived[nxt] = (arrived[nxt] || 0) + r.qty; }
+        const idx = findActiveIndex(seq, arrived, departed, r.station);
+        if (idx < 0) return; // no active occurrence had qty — shouldn't happen for validated records
+        departed[idx] = (departed[idx] || 0) + r.qty;
+        if (idx === seq.length - 1) { completed += r.qty; }
+        else { arrived[idx + 1] = (arrived[idx + 1] || 0) + r.qty; }
       } else if (r.type === "skip") {
         // Nothing has "arrived" at the skip-to station through the normal
         // sequence, so the qty is drawn from wherever the batch currently
-        // sits (earliest active queue first), then behaves like a normal
+        // sits (earliest active position first), then behaves like a normal
         // pass from the skip-to station onward.
         let remaining = r.qty;
-        for (const name of seq) {
-          if (remaining <= 0) break;
-          const here = Math.max((arrived[name] || 0) - (departed[name] || 0), 0);
+        for (let i = 0; i < seq.length && remaining > 0; i++) {
+          const here = Math.max((arrived[i] || 0) - (departed[i] || 0), 0);
           if (here <= 0) continue;
           const take = Math.min(here, remaining);
-          departed[name] = (departed[name] || 0) + take;
+          departed[i] = (departed[i] || 0) + take;
           remaining -= take;
         }
-        const idx = seq.indexOf(r.station);
+        const idx = seq.indexOf(r.station); // skip target: first occurrence of that name
         if (idx >= 0 && idx === seq.length - 1) { completed += r.qty; }
-        else if (idx >= 0) { const nxt = seq[idx + 1]; arrived[nxt] = (arrived[nxt] || 0) + r.qty; }
+        else if (idx >= 0) { arrived[idx + 1] = (arrived[idx + 1] || 0) + r.qty; }
       } else if (r.type === "exception") {
-        departed[r.station] = (departed[r.station] || 0) + r.qty;
-        arrived[r.targetStation] = (arrived[r.targetStation] || 0) + r.qty;
+        const fromIdx = findActiveIndex(seq, arrived, departed, r.station);
+        if (fromIdx >= 0) departed[fromIdx] = (departed[fromIdx] || 0) + r.qty;
+        const toIdx = seq.indexOf(r.targetStation); // first occurrence of the target name
+        if (toIdx >= 0) arrived[toIdx] = (arrived[toIdx] || 0) + r.qty;
         pendingExceptions.push(r);
       }
     });
-    const queues = seq.map(name => ({ name, qty: Math.max((arrived[name] || 0) - (departed[name] || 0), 0) }))
+    const queues = seq.map((name, idx) => ({ name, idx, qty: Math.max((arrived[idx] || 0) - (departed[idx] || 0), 0) }))
       .filter(q => q.qty > 0);
     return { seq, process: proc || null, arrived, departed, completed, queues, pendingExceptions, log };
   }
 
   function available(ctx, woId, station) {
     const r = replay(ctx, woId);
-    return Math.max((r.arrived[station] || 0) - (r.departed[station] || 0), 0);
+    const idx = findActiveIndex(r.seq, r.arrived, r.departed, station);
+    return idx < 0 ? 0 : Math.max((r.arrived[idx] || 0) - (r.departed[idx] || 0), 0);
   }
 
   // Total qty still "in process" somewhere in the work order's queues. Used to
@@ -789,74 +807,80 @@ function travelerCard(wo){
 /* ============================= MASTER (products & work orders) ============================= */
 let showProductForm = false;
 let showWoForm = false;
+let statsProductId = null;
 
 function renderMaster(){
   const el = document.getElementById("view-master");
   el.innerHTML = `
     <div class="grid cols-2">
-      <div class="card">
-        <div class="card-head">
-          <h2>建立產品資料</h2>
-          <button class="btn ${showProductForm?"ghost":"accent"} sm" id="btn-toggle-product-form">${icon("plus")}${showProductForm?"取消":"新增產品"}</button>
-        </div>
-        ${showProductForm ? `
-        <div class="card-pad stack">
-          <div class="form-row">
-            <div class="field"><label>產品名稱 <span class="req">*</span></label><input type="text" id="f-prod-name" placeholder="例：80CS"></div>
-            <div class="field"><label>規格 / 備註</label><input type="text" id="f-prod-spec" placeholder="選填"></div>
+      <div class="stack">
+        <div class="card">
+          <div class="card-head">
+            <h2>建立產品資料</h2>
+            <button class="btn ${showProductForm?"ghost":"accent"} sm" id="btn-toggle-product-form">${icon("plus")}${showProductForm?"取消":"新增產品"}</button>
           </div>
-          <div class="field">
-            <label>所屬製程</label>
-            <select id="f-prod-process">
-              <option value="">尚未指定（可稍後再設定）</option>
-              ${state.processes.map(p=>`<option value="${p.id}">${escapeHtml(p.name)}（${stationSeq(p.id).join(" → ") || "尚無站別"}）</option>`).join("")}
-            </select>
-          </div>
-          <div><button class="btn accent" id="btn-add-product">${icon("plus")}確認新增</button></div>
-        </div>` : ""}
-      </div>
-      <div class="card">
-        <div class="card-head">
-          <h2>建立生產工單</h2>
-          <button class="btn ${showWoForm?"ghost":"accent"} sm" id="btn-toggle-wo-form" ${state.products.length?"":"disabled"}>${icon("plus")}${showWoForm?"取消":"建立工單"}</button>
-        </div>
-        ${showWoForm ? `
-        <div class="card-pad stack">
-          <div class="form-row">
-            <div class="field"><label>產品 <span class="req">*</span></label>
-              <select id="f-wo-product">${state.products.map(p=>`<option value="${p.id}">${escapeHtml(p.name)}</option>`).join("") || `<option value="">請先建立產品</option>`}</select>
+          ${showProductForm ? `
+          <div class="card-pad stack">
+            <div class="form-row">
+              <div class="field"><label>產品名稱 <span class="req">*</span></label><input type="text" id="f-prod-name" placeholder="例：80CS"></div>
+              <div class="field"><label>規格 / 備註</label><input type="text" id="f-prod-spec" placeholder="選填"></div>
             </div>
-            <div class="field"><label>工單號碼 <span class="req">*</span></label><input type="text" id="f-wo-no" placeholder="例：WO-20260808-02"></div>
-            <div class="field"><label>預計生產數量 <span class="req">*</span></label><input type="number" id="f-wo-qty" min="1" placeholder="件"></div>
-          </div>
-          <div><button class="btn accent" id="btn-add-wo">${icon("plus")}確認建立</button></div>
-        </div>` : `<div class="card-pad"><span class="muted small">需先建立產品</span></div>`}
+            <div class="field">
+              <label>所屬製程</label>
+              <select id="f-prod-process">
+                <option value="">尚未指定（可稍後再設定）</option>
+                ${state.processes.map(p=>`<option value="${p.id}">${escapeHtml(p.name)}（${stationSeq(p.id).join(" → ") || "尚無站別"}）</option>`).join("")}
+              </select>
+            </div>
+            <div><button class="btn accent" id="btn-add-product">${icon("plus")}確認新增</button></div>
+          </div>` : ""}
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>產品清單</h2><span class="hint">${state.products.length} 項</span></div>
+          <div class="table-wrap"><table><thead><tr><th>產品名稱</th><th>規格 / 備註</th><th>所屬製程</th><th>相關工單數</th></tr></thead>
+          <tbody>${state.products.length ? state.products.map(p=>`<tr>
+            <td><b>${escapeHtml(p.name)}</b></td>
+            <td class="muted">${escapeHtml(p.spec||"—")}</td>
+            <td><select data-set-process="${p.id}" style="min-width:160px">
+              <option value="">尚未指定</option>
+              ${state.processes.map(proc=>`<option value="${proc.id}" ${proc.id===p.processId?"selected":""}>${escapeHtml(proc.name)}</option>`).join("")}
+            </select></td>
+            <td class="num">${state.workOrders.filter(w=>w.productId===p.id).length}</td>
+          </tr>`).join("") : `<tr><td colspan="4" class="empty-row">尚未建立產品</td></tr>`}</tbody></table></div>
+        </div>
       </div>
-    </div>
 
-    <div class="card">
-      <div class="card-head"><h2>產品清單</h2><span class="hint">${state.products.length} 項</span></div>
-      <div class="table-wrap"><table><thead><tr><th>產品名稱</th><th>規格 / 備註</th><th>所屬製程</th><th>相關工單數</th></tr></thead>
-      <tbody>${state.products.length ? state.products.map(p=>`<tr>
-        <td><b>${escapeHtml(p.name)}</b></td>
-        <td class="muted">${escapeHtml(p.spec||"—")}</td>
-        <td><select data-set-process="${p.id}" style="min-width:160px">
-          <option value="">尚未指定</option>
-          ${state.processes.map(proc=>`<option value="${proc.id}" ${proc.id===p.processId?"selected":""}>${escapeHtml(proc.name)}</option>`).join("")}
-        </select></td>
-        <td class="num">${state.workOrders.filter(w=>w.productId===p.id).length}</td>
-      </tr>`).join("") : `<tr><td colspan="4" class="empty-row">尚未建立產品</td></tr>`}</tbody></table></div>
-    </div>
+      <div class="stack">
+        <div class="card">
+          <div class="card-head">
+            <h2>建立生產工單</h2>
+            <button class="btn ${showWoForm?"ghost":"accent"} sm" id="btn-toggle-wo-form" ${state.products.length?"":"disabled"}>${icon("plus")}${showWoForm?"取消":"建立工單"}</button>
+          </div>
+          ${showWoForm ? `
+          <div class="card-pad stack">
+            <div class="form-row">
+              <div class="field"><label>產品 <span class="req">*</span></label>
+                <select id="f-wo-product">${state.products.map(p=>`<option value="${p.id}">${escapeHtml(p.name)}</option>`).join("") || `<option value="">請先建立產品</option>`}</select>
+              </div>
+              <div class="field"><label>工單號碼 <span class="req">*</span></label><input type="text" id="f-wo-no" placeholder="例：WO-20260808-02"></div>
+              <div class="field"><label>預計生產數量 <span class="req">*</span></label><input type="number" id="f-wo-qty" min="1" placeholder="件"></div>
+            </div>
+            <div><button class="btn accent" id="btn-add-wo">${icon("plus")}確認建立</button></div>
+          </div>` : `<div class="card-pad"><span class="muted small">需先建立產品</span></div>`}
+        </div>
 
-    <div class="card">
-      <div class="card-head"><h2>工單清單</h2><span class="hint">點一筆工單即可登記過站</span></div>
-      <div class="table-wrap"><table><thead><tr><th>工單號碼</th><th>產品</th><th>預計數量</th><th>已完成</th><th>目前狀態</th><th>建立時間</th></tr></thead>
-      <tbody>${state.workOrders.length ? state.workOrders.map(w=>{
-        const prod = productById(w.productId); const prog = woProgress(w.id);
-        const done = prog.currentLabel==="已完工";
-        const chip = done ? `<span class="chip success">已完工</span>` : `<span class="chip info">${escapeHtml(prog.currentLabel)}</span>`;
-        return `<tr class="${done?"":"clickable"}" ${done?"":`data-open-transit="${w.id}"`} title="${done?"":"點一下登記過站"}"><td class="num"><b>${escapeHtml(w.no)}</b></td><td>${escapeHtml(prod?prod.name:"—")}</td><td class="num">${w.plannedQty}</td><td class="num">${prog.completed}</td><td>${chip}</td><td class="num small muted">${fmtDateTime(w.createdAt)}</td></tr>`;
-      }).join("") : `<tr><td colspan="6" class="empty-row">尚未建立工單</td></tr>`}</tbody></table></div>
+        <div class="card">
+          <div class="card-head"><h2>工單清單</h2><span class="hint">點一筆工單即可登記過站</span></div>
+          <div class="table-wrap"><table><thead><tr><th>工單號碼</th><th>產品</th><th>預計數量</th><th>已完成</th><th>目前狀態</th><th>建立時間</th></tr></thead>
+          <tbody>${state.workOrders.length ? state.workOrders.map(w=>{
+            const prod = productById(w.productId); const prog = woProgress(w.id);
+            const done = prog.currentLabel==="已完工";
+            const chip = done ? `<span class="chip success">已完工</span>` : `<span class="chip info">${escapeHtml(prog.currentLabel)}</span>`;
+            return `<tr class="${done?"":"clickable"}" ${done?"":`data-open-transit="${w.id}"`} title="${done?"":"點一下登記過站"}"><td class="num"><b>${escapeHtml(w.no)}</b></td><td>${escapeHtml(prod?prod.name:"—")}</td><td class="num">${w.plannedQty}</td><td class="num">${prog.completed}</td><td>${chip}</td><td class="num small muted">${fmtDateTime(w.createdAt)}</td></tr>`;
+          }).join("") : `<tr><td colspan="6" class="empty-row">尚未建立工單</td></tr>`}</tbody></table></div>
+        </div>
+      </div>
     </div>
   `;
 
@@ -964,9 +988,9 @@ function renderStations(){
     const chainHtml = blocksInProc.length ? blocksInProc.map((s, idx) => {
       const color = blockColor(s.id);
       const connector = idx < blocksInProc.length-1 ? `<div class="chain-connector"></div>` : "";
-      return `<div class="chain-block" draggable="true" data-drag-chain="${s.id}" data-proc="${proc.id}" style="background:${color}">
+      return `<div class="chain-block" draggable="true" data-drag-chain="${s.id}" data-chain-index="${idx}" data-proc="${proc.id}" style="background:${color}">
         <span class="order-num">${idx+1}</span><span>${escapeHtml(s.name)}</span>
-        <button data-proc-remove="${proc.id}" data-station="${s.id}" title="從此製程移除">${icon("trash")}</button>
+        <button data-proc-remove="${proc.id}" data-station="${s.id}" data-index="${idx}" title="從此製程移除">${icon("trash")}</button>
       </div>${connector}`;
     }).join("") : `<span class="block-chain-empty">把左邊積木庫的站別拖進這裡開始排流程</span>`;
     return `
@@ -1013,7 +1037,7 @@ function renderStations(){
   }));
   el.querySelectorAll("[data-proc-remove]").forEach(b=>b.addEventListener("click",(e)=>{
     e.stopPropagation();
-    withServerSync(() => api(`/api/processes/${b.dataset.procRemove}/stations/${b.dataset.station}`, "DELETE"));
+    withServerSync(() => api(`/api/processes/${b.dataset.procRemove}/stations/${b.dataset.station}?index=${b.dataset.index}`, "DELETE"));
   }));
 
   wireStationDragAndDrop(el);
@@ -1022,11 +1046,11 @@ function renderStations(){
 /* 拖拉邏輯：從積木庫拖站別到某製程的軌道（加入到最後，或插在既有積木之間），
    或是把軌道上已經在排的積木拖到新位置（同一製程內重新排序）。 */
 function wireStationDragAndDrop(el){
-  let dragPayload = null; // { stationId, fromProcessId | null }
+  let dragPayload = null; // { stationId, fromProcessId | null, fromIndex | null }
 
   el.querySelectorAll("[data-drag-station]").forEach(tile => {
     tile.addEventListener("dragstart", (e) => {
-      dragPayload = { stationId: tile.dataset.dragStation, fromProcessId: null };
+      dragPayload = { stationId: tile.dataset.dragStation, fromProcessId: null, fromIndex: null };
       tile.classList.add("dragging");
       e.dataTransfer.effectAllowed = "copy";
     });
@@ -1034,7 +1058,7 @@ function wireStationDragAndDrop(el){
   });
   el.querySelectorAll("[data-drag-chain]").forEach(block => {
     block.addEventListener("dragstart", (e) => {
-      dragPayload = { stationId: block.dataset.dragChain, fromProcessId: block.dataset.proc };
+      dragPayload = { stationId: block.dataset.dragChain, fromProcessId: block.dataset.proc, fromIndex: parseInt(block.dataset.chainIndex, 10) };
       block.classList.add("dragging");
       e.dataTransfer.effectAllowed = "move";
     });
@@ -1049,41 +1073,51 @@ function wireStationDragAndDrop(el){
       e.preventDefault();
       zone.classList.remove("dropzone-active");
       if (!dragPayload) return;
-      const { stationId, fromProcessId } = dragPayload;
+      const { stationId, fromProcessId, fromIndex } = dragPayload;
       dragPayload = null;
 
-      // 決定插入位置：滑鼠落點左邊已經有幾個積木。
-      const chainBlocks = [...zone.querySelectorAll("[data-drag-chain]")].filter(b => b.dataset.dragChain !== stationId || fromProcessId !== procId);
-      let insertBeforeId = null;
-      for (const b of chainBlocks) {
-        const rect = b.getBoundingClientRect();
-        if (e.clientX < rect.left + rect.width/2) { insertBeforeId = b.dataset.dragChain; break; }
+      // 決定插入位置：滑鼠落點左邊已經有幾個積木（排除正在拖曳的積木本身）。
+      // 用「軌道內的位置」而不是站別 id 來判斷要排除誰／要插在誰前面，因為
+      // 同一個站別積木可能在同一條製程裡出現不只一次。
+      const chainBlocks = [...zone.querySelectorAll("[data-drag-chain]")].filter(b =>
+        !(fromProcessId === procId && parseInt(b.dataset.chainIndex, 10) === fromIndex));
+      let insertAt = chainBlocks.length;
+      for (let i = 0; i < chainBlocks.length; i++) {
+        const rect = chainBlocks[i].getBoundingClientRect();
+        if (e.clientX < rect.left + rect.width/2) { insertAt = i; break; }
       }
 
       if (fromProcessId === procId) {
-        // 同一條軌道內重新排序
+        // 同一條軌道內重新排序：用原本的位置（index）搬移，而不是用站別 id，
+        // 否則同一站別重複出現時會搬錯那一個、或把重複的其中一個弄丟。
         const proc = processById(procId);
-        const ids = proc.stationIds.filter(id => id !== stationId);
-        const insertAt = insertBeforeId ? ids.indexOf(insertBeforeId) : ids.length;
-        ids.splice(insertAt < 0 ? ids.length : insertAt, 0, stationId);
+        const ids = proc.stationIds.slice();
+        ids.splice(fromIndex, 1);
+        ids.splice(insertAt, 0, stationId);
         withServerSync(() => api(`/api/processes/${procId}/stations/reorder`, "POST", { stationIds: ids }));
       } else if (!fromProcessId) {
-        // 從積木庫拖進來：先加入，如果沒有落在最後面，再排到正確位置
+        // 從積木庫拖進來：先加入到最後，如果沒有落在最後面，再排到正確位置
+        const oldIds = processById(procId).stationIds;
         withServerSync(async () => {
           await api(`/api/processes/${procId}/stations`, "POST", { stationId });
-          if (insertBeforeId) {
-            const proc = state.processes.find(p => p.id === procId);
-            const ids = proc.stationIds.filter(id => id !== stationId);
-            const insertAt = ids.indexOf(insertBeforeId);
-            ids.splice(insertAt < 0 ? ids.length : insertAt, 0, stationId);
+          if (insertAt < oldIds.length) {
+            const ids = oldIds.slice();
+            ids.splice(insertAt, 0, stationId);
             await api(`/api/processes/${procId}/stations/reorder`, "POST", { stationIds: ids });
           }
         });
       } else {
-        // 從另一個製程的軌道拖過來：從原製程移除，加入這個製程
+        // 從另一個製程的軌道拖過來：從原製程移除（依原本位置，避免同名站別
+        // 重複時刪錯那一個），再加入這個製程
+        const oldIds = processById(procId).stationIds;
         withServerSync(async () => {
-          await api(`/api/processes/${fromProcessId}/stations/${stationId}`, "DELETE");
+          await api(`/api/processes/${fromProcessId}/stations/${stationId}?index=${fromIndex}`, "DELETE");
           await api(`/api/processes/${procId}/stations`, "POST", { stationId });
+          if (insertAt < oldIds.length) {
+            const ids = oldIds.slice();
+            ids.splice(insertAt, 0, stationId);
+            await api(`/api/processes/${procId}/stations/reorder`, "POST", { stationIds: ids });
+          }
         });
       }
     });
@@ -1440,6 +1474,71 @@ function renderStats(){
       <div class="stat-bar-num num">${r.qty}${extra?extra(r):""}</div>
     </div>`).join("") : `<div class="empty-row muted">尚無資料</div>`;
 
+  if (!statsProductId || !productById(statsProductId)) statsProductId = state.products.length ? state.products[0].id : null;
+  const flowProduct = statsProductId ? productById(statsProductId) : null;
+  const flowSeq = flowProduct ? stationSeq(flowProduct.processId) : [];
+  // Same station name can occur more than once in one process (see 站別設定's
+  // repeatable blocks), so a pass at that name is attributed to a specific
+  // SEQUENCE POSITION — replaying each work order's own log, exactly like
+  // PFMLogic.replay() does — rather than just summed by name, otherwise every
+  // occurrence of a repeated station would show an identical (double-counted)
+  // total instead of tracking which leg of the loop it actually happened on.
+  function findActiveIdxForFlow(seq, arrived, departed, name) {
+    for (let i = 0; i < seq.length; i++) {
+      if (seq[i] !== name) continue;
+      if (((arrived[i] || 0) - (departed[i] || 0)) > 0) return i;
+    }
+    return -1;
+  }
+  const flowWos = flowProduct ? state.workOrders.filter(w=>w.productId===statsProductId) : [];
+  const cellTotals = {}; // `${date}|${idx}` -> qty
+  flowWos.forEach(wo => {
+    const arrived = {}, departed = {};
+    if (flowSeq.length) arrived[0] = wo.plannedQty;
+    activeRecordsFor(wo.id).forEach(r => {
+      if (r.type === "normal") {
+        const idx = findActiveIdxForFlow(flowSeq, arrived, departed, r.station);
+        if (idx < 0) return;
+        departed[idx] = (departed[idx] || 0) + r.qty;
+        cellTotals[`${r.date}|${idx}`] = (cellTotals[`${r.date}|${idx}`] || 0) + r.qty;
+        if (idx < flowSeq.length - 1) arrived[idx + 1] = (arrived[idx + 1] || 0) + r.qty;
+      } else if (r.type === "skip") {
+        let remaining = r.qty;
+        for (let i = 0; i < flowSeq.length && remaining > 0; i++) {
+          const here = Math.max((arrived[i] || 0) - (departed[i] || 0), 0);
+          if (here <= 0) continue;
+          const take = Math.min(here, remaining);
+          departed[i] = (departed[i] || 0) + take;
+          remaining -= take;
+        }
+        const idx = flowSeq.indexOf(r.station);
+        if (idx >= 0) {
+          cellTotals[`${r.date}|${idx}`] = (cellTotals[`${r.date}|${idx}`] || 0) + r.qty;
+          if (idx < flowSeq.length - 1) arrived[idx + 1] = (arrived[idx + 1] || 0) + r.qty;
+        }
+      } else if (r.type === "exception") {
+        const fromIdx = findActiveIdxForFlow(flowSeq, arrived, departed, r.station);
+        if (fromIdx >= 0) {
+          departed[fromIdx] = (departed[fromIdx] || 0) + r.qty;
+          cellTotals[`${r.date}|${fromIdx}`] = (cellTotals[`${r.date}|${fromIdx}`] || 0) + r.qty;
+        }
+        const toIdx = flowSeq.indexOf(r.targetStation);
+        if (toIdx >= 0) arrived[toIdx] = (arrived[toIdx] || 0) + r.qty;
+      }
+    });
+  });
+  const flowDates = [...new Set(Object.keys(cellTotals).map(k=>k.split("|")[0]))].sort();
+  const flowMatrix = flowDates.map(date => {
+    const cells = flowSeq.map((name, idx) => cellTotals[`${date}|${idx}`] || 0);
+    return { date, cells, total: cells.reduce((a,b)=>a+b,0) };
+  });
+  const nameSeen = {};
+  const flowSeqLabels = flowSeq.map(name => {
+    nameSeen[name] = (nameSeen[name] || 0) + 1;
+    const occurrences = flowSeq.filter(n=>n===name).length;
+    return occurrences > 1 ? `${name}（第${nameSeen[name]}次）` : name;
+  });
+
   el.innerHTML = `
     <div class="grid cols-3">
       <div class="card">
@@ -1455,7 +1554,34 @@ function renderStats(){
         <div class="card-pad">${barBlock(byStation, maxStation, r=>r.exQty?` (分流 ${r.exQty})`:"")}</div>
       </div>
     </div>
+
+    <div class="card">
+      <div class="card-head"><h2>生產流程圖表</h2><span class="hint">單一產品的過站數量，依日期 × 站別呈現</span></div>
+      <div class="card-pad stack">
+        <div class="field" style="max-width:280px">
+          <label>選擇產品</label>
+          <select id="f-stats-product">${state.products.map(p=>`<option value="${p.id}" ${p.id===statsProductId?"selected":""}>${escapeHtml(p.name)}</option>`).join("") || `<option value="">尚未建立產品</option>`}</select>
+        </div>
+        ${!flowProduct ? `<div class="empty-row muted">尚未建立產品</div>`
+          : !flowSeq.length ? `<div class="empty-row muted">此產品尚未指定製程，無法顯示流程圖表</div>`
+          : !flowMatrix.length ? `<div class="empty-row muted">此產品尚無過站紀錄</div>`
+          : `<div class="table-wrap"><table>
+            <thead><tr><th>日期</th>${flowSeqLabels.map(name=>`<th>${escapeHtml(name)}</th>`).join("")}<th>當日合計</th></tr></thead>
+            <tbody>${flowMatrix.map(row => `<tr>
+              <td class="num small muted">${escapeHtml(row.date)}</td>
+              ${row.cells.map(qty => `<td class="num" style="${qty?"background:var(--accent-soft)":""}">${qty||"—"}</td>`).join("")}
+              <td class="num"><b>${row.total}</b></td>
+            </tr>`).join("")}</tbody>
+          </table></div>`}
+      </div>
+    </div>
   `;
+
+  const selStatsProduct = document.getElementById("f-stats-product");
+  if (selStatsProduct) selStatsProduct.addEventListener("change", () => {
+    statsProductId = selStatsProduct.value || null;
+    renderStats();
+  });
 }
 
 /* ============================= HISTORY / CORRECTIONS ============================= */

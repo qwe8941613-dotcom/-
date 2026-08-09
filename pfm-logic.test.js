@@ -34,7 +34,7 @@ function rec(overrides) {
 test("replay: fresh work order queues its full planned qty at the first station", () => {
   const ctx = baseCtx();
   const r = Logic.replay(ctx, "wo1");
-  assert.equal(r.arrived["接 Block"], 100);
+  assert.equal(r.arrived[0], 100); // arrived/departed are keyed by sequence position, not name
   assert.equal(Logic.available(ctx, "wo1", "接 Block"), 100);
   assert.equal(Logic.available(ctx, "wo1", "清洗站"), 0);
 });
@@ -231,4 +231,39 @@ test("runDiagnostics: a station that exists as a block but isn't part of this pr
   const result = Logic.runDiagnostics(ctx, fields);
   assert.equal(result.diags.filter(d => d.status === "fail").length, 0);
   assert.equal(result.effectiveType, "skip");
+});
+
+/* ---- 同一個站別積木可以在同一條製程裡出現不只一次 ---- */
+
+function repeatedCtx() {
+  const ctx = baseCtx();
+  // 接 Block -> 清洗站 -> 接 Block（第二次）-> 包裝站
+  ctx.processes[0].stationIds = ["s1", "s2", "s1", "s4"];
+  return ctx;
+}
+
+test("stationSeq: the same station block can appear more than once in a process", () => {
+  const ctx = repeatedCtx();
+  assert.deepEqual(Logic.stationSeq(ctx, "proc1"), ["接 Block", "清洗站", "接 Block", "包裝站"]);
+});
+
+test("replay: a normal pass at a repeated station name resolves to the earliest occurrence that actually has qty", () => {
+  const ctx = repeatedCtx();
+  // All 100 start at position 0 (first 接 Block). A pass here must apply to
+  // position 0, not accidentally match position 2 (also named 接 Block).
+  ctx.records.push(rec({ station: "接 Block", qty: 30, type: "normal" }));
+  assert.equal(Logic.available(ctx, "wo1", "接 Block"), 70); // position 0 only — position 2 is still empty
+  assert.equal(Logic.available(ctx, "wo1", "清洗站"), 30);
+});
+
+test("replay: once the first occurrence is drained, a pass at that station name resolves to the next occurrence", () => {
+  const ctx = repeatedCtx();
+  ctx.records.push(rec({ station: "接 Block", qty: 100, type: "normal" })); // drains position 0 entirely -> 清洗站
+  ctx.records.push(rec({ station: "清洗站", qty: 100, type: "normal" }));   // -> arrives at position 2 (接 Block again)
+  assert.equal(Logic.available(ctx, "wo1", "接 Block"), 100); // now resolves to position 2, not the drained position 0
+  const prog = Logic.woProgress(ctx, "wo1");
+  assert.equal(prog.currentLabel, "接 Block"); // reads as just the station name; position is internal
+  ctx.records.push(rec({ station: "接 Block", qty: 100, type: "normal" })); // -> 包裝站 (last step) -> completed
+  assert.equal(Logic.woProgress(ctx, "wo1").completed, 0); // 包裝站 isn't the end until it passes through
+  assert.equal(Logic.available(ctx, "wo1", "包裝站"), 100);
 });

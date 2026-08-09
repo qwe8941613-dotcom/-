@@ -229,7 +229,7 @@ app.post("/api/processes/:id/stations", (req, res) => {
   if (!proc) return res.status(404).json({ error: "找不到此製程" });
   const stationId = req.body.stationId;
   if (!state.stations.some(s => s.id === stationId)) return res.status(400).json({ error: "站別不存在" });
-  if (proc.stationIds.includes(stationId)) return res.status(400).json({ error: "此站別已在製程中" });
+  // 同一個站別積木可以在同一條製程裡出現不只一次（例如去而復返），所以不擋重複。
   proc.stationIds.push(stationId);
   saveState(state);
   res.json(proc);
@@ -240,7 +240,11 @@ app.post("/api/processes/:id/stations/reorder", (req, res) => {
   if (!proc) return res.status(404).json({ error: "找不到此製程" });
   const ids = req.body.stationIds || [];
   if (!Array.isArray(ids) || ids.length !== proc.stationIds.length) return res.status(400).json({ error: "站別清單不完整" });
-  const same = ids.every(id => proc.stationIds.includes(id));
+  // 站別可以重複，所以用「排序後逐一比對」確認是同一組積木（含重複次數），
+  // 而不是只檢查每個 id 有沒有出現過──否則可能被偷換掉某個重複的站別。
+  const sortedOld = [...proc.stationIds].sort();
+  const sortedNew = [...ids].sort();
+  const same = sortedOld.length === sortedNew.length && sortedOld.every((id, i) => id === sortedNew[i]);
   if (!same) return res.status(400).json({ error: "站別清單不一致" });
   proc.stationIds = ids;
   saveState(state);
@@ -250,7 +254,11 @@ app.post("/api/processes/:id/stations/reorder", (req, res) => {
 app.delete("/api/processes/:id/stations/:stationId", (req, res) => {
   const proc = findProcess(req.params.id);
   if (!proc) return res.status(404).json({ error: "找不到此製程" });
-  proc.stationIds = proc.stationIds.filter(id => id !== req.params.stationId);
+  // 站別可能在同一條製程裡重複出現，所以優先用呼叫端指定的位置（index）刪除
+  // 那一個特定的積木；沒給位置時退回刪除第一個符合的，維持舊行為相容。
+  const idx = req.query.index !== undefined ? parseInt(req.query.index, 10) : proc.stationIds.indexOf(req.params.stationId);
+  if (!(idx >= 0) || proc.stationIds[idx] !== req.params.stationId) return res.status(400).json({ error: "站別位置不正確" });
+  proc.stationIds.splice(idx, 1);
   saveState(state);
   res.json(proc);
 });

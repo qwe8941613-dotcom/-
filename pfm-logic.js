@@ -50,54 +50,72 @@ function activeRecordsFor(ctx, woId) {
   return ctx.records.filter(r => r.workOrderId === woId && !r.superseded).sort((a, b) => a.createdAt - b.createdAt);
 }
 
+// A station block can appear more than once in the same process (e.g. a
+// batch that visits 接 Block, then comes back to it later). Tracking by
+// station NAME alone can't tell those occurrences apart, so `arrived`/
+// `departed` below are keyed by SEQUENCE POSITION (index), not name. Given a
+// station name, the "active" occurrence is the earliest position holding
+// that name with qty still sitting there — first-in-line, matching how a
+// linear process actually drains.
+function findActiveIndex(seq, arrived, departed, stationName) {
+  for (let i = 0; i < seq.length; i++) {
+    if (seq[i] !== stationName) continue;
+    if (((arrived[i] || 0) - (departed[i] || 0)) > 0) return i;
+  }
+  return -1;
+}
+
 /* Replay a work order's records against its product's process sequence to
    derive per-station queue levels, completed qty and current position. */
 function replay(ctx, woId) {
   const wo = woById(ctx, woId);
   const proc = processForWO(ctx, wo);
   const seq = stationSeq(ctx, proc ? proc.id : null);
-  const arrived = {}, departed = {};
-  if (seq.length) arrived[seq[0]] = wo ? wo.plannedQty : 0;
+  const arrived = {}, departed = {}; // keyed by index into `seq`
+  if (seq.length) arrived[0] = wo ? wo.plannedQty : 0;
   let completed = 0;
   const pendingExceptions = [];
   const log = activeRecordsFor(ctx, woId);
   log.forEach(r => {
     if (r.type === "normal") {
-      departed[r.station] = (departed[r.station] || 0) + r.qty;
-      const idx = seq.indexOf(r.station);
-      if (idx >= 0 && idx === seq.length - 1) { completed += r.qty; }
-      else if (idx >= 0) { const nxt = seq[idx + 1]; arrived[nxt] = (arrived[nxt] || 0) + r.qty; }
+      const idx = findActiveIndex(seq, arrived, departed, r.station);
+      if (idx < 0) return; // no active occurrence had qty — shouldn't happen for validated records
+      departed[idx] = (departed[idx] || 0) + r.qty;
+      if (idx === seq.length - 1) { completed += r.qty; }
+      else { arrived[idx + 1] = (arrived[idx + 1] || 0) + r.qty; }
     } else if (r.type === "skip") {
       // Nothing has "arrived" at the skip-to station through the normal
       // sequence, so the qty is drawn from wherever the batch currently
-      // sits (earliest active queue first), then behaves like a normal
+      // sits (earliest active position first), then behaves like a normal
       // pass from the skip-to station onward.
       let remaining = r.qty;
-      for (const name of seq) {
-        if (remaining <= 0) break;
-        const here = Math.max((arrived[name] || 0) - (departed[name] || 0), 0);
+      for (let i = 0; i < seq.length && remaining > 0; i++) {
+        const here = Math.max((arrived[i] || 0) - (departed[i] || 0), 0);
         if (here <= 0) continue;
         const take = Math.min(here, remaining);
-        departed[name] = (departed[name] || 0) + take;
+        departed[i] = (departed[i] || 0) + take;
         remaining -= take;
       }
-      const idx = seq.indexOf(r.station);
+      const idx = seq.indexOf(r.station); // skip target: first occurrence of that name
       if (idx >= 0 && idx === seq.length - 1) { completed += r.qty; }
-      else if (idx >= 0) { const nxt = seq[idx + 1]; arrived[nxt] = (arrived[nxt] || 0) + r.qty; }
+      else if (idx >= 0) { arrived[idx + 1] = (arrived[idx + 1] || 0) + r.qty; }
     } else if (r.type === "exception") {
-      departed[r.station] = (departed[r.station] || 0) + r.qty;
-      arrived[r.targetStation] = (arrived[r.targetStation] || 0) + r.qty;
+      const fromIdx = findActiveIndex(seq, arrived, departed, r.station);
+      if (fromIdx >= 0) departed[fromIdx] = (departed[fromIdx] || 0) + r.qty;
+      const toIdx = seq.indexOf(r.targetStation); // first occurrence of the target name
+      if (toIdx >= 0) arrived[toIdx] = (arrived[toIdx] || 0) + r.qty;
       pendingExceptions.push(r);
     }
   });
-  const queues = seq.map(name => ({ name, qty: Math.max((arrived[name] || 0) - (departed[name] || 0), 0) }))
+  const queues = seq.map((name, idx) => ({ name, idx, qty: Math.max((arrived[idx] || 0) - (departed[idx] || 0), 0) }))
     .filter(q => q.qty > 0);
   return { seq, process: proc || null, arrived, departed, completed, queues, pendingExceptions, log };
 }
 
 function available(ctx, woId, station) {
   const r = replay(ctx, woId);
-  return Math.max((r.arrived[station] || 0) - (r.departed[station] || 0), 0);
+  const idx = findActiveIndex(r.seq, r.arrived, r.departed, station);
+  return idx < 0 ? 0 : Math.max((r.arrived[idx] || 0) - (r.departed[idx] || 0), 0);
 }
 
 // Total qty still "in process" somewhere in the work order's queues. Used to
