@@ -246,6 +246,7 @@
   .small{ font-size:12px; }
   .small.over{ color:var(--danger); font-weight:700; }
   .stack{ display:flex; flex-direction:column; gap:10px; }
+  .section-label{ font-size:12px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-faint); padding-bottom:4px; border-bottom:1px solid var(--border); }
   .inline-list{ display:flex; flex-wrap:wrap; gap:8px; }
   .tag-editable{ display:flex; align-items:center; gap:8px; background:var(--surface-2); border:1px solid var(--border); border-radius:6px; padding:6px 8px 6px 12px; font-size:12.5px; }
   .tag-editable b{ font-family:var(--font-mono); }
@@ -811,8 +812,9 @@ let showWoForm = false;
 function renderMaster(){
   const el = document.getElementById("view-master");
   el.innerHTML = `
-    <div class="stack">
+    <div class="stack" style="gap:32px">
       <div class="stack">
+        <div class="section-label">產品</div>
         <div class="card">
           <div class="card-head">
             <h2>建立產品資料</h2>
@@ -851,6 +853,7 @@ function renderMaster(){
       </div>
 
       <div class="stack">
+        <div class="section-label">工單</div>
         <div class="card">
           <div class="card-head">
             <h2>建立生產工單</h2>
